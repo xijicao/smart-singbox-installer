@@ -100,7 +100,7 @@
   <text class="text" x="1255" y="492">• Alpine → home-alpine</text>
 
   <rect class="green" x="1230" y="540" rx="22" ry="22" width="410" height="245" />
-  <text class="label" x="1255" y="578">安装模式 HOME_MODE</text>
+  <text class="label" x="1255" y="578">安装模式选择</text>
   <text class="text" x="1255" y="616">• ss2022：只做落地</text>
   <text class="small" x="1285" y="646">输出 ss_link，给 DMIT/HK 导入</text>
   <text class="text" x="1255" y="682">• reality：只做直连</text>
@@ -128,19 +128,19 @@
 
   <!-- Commands row -->
   <rect class="section" x="70" y="885" rx="28" ry="28" width="2260" height="305" />
-  <text class="sectionTitle" x="1200" y="935" text-anchor="middle">一行命令怎么用</text>
+  <text class="sectionTitle" x="1200" y="935" text-anchor="middle">一条命令 + 固定菜单</text>
 
   <rect class="card" x="110" y="970" rx="18" ry="18" width="520" height="170" />
-  <text class="num" x="135" y="1008">1. 装入口机器</text>
-  <text class="cmd" x="135" y="1046">PROFILE=dmit-debian sh</text>
-  <text class="cmd" x="135" y="1080">PROFILE=hk-debian sh</text>
-  <text class="small" x="135" y="1116">输出 me / friend 对应 Reality 链接</text>
+  <text class="num" x="135" y="1008">1. 先跑唯一命令</text>
+  <text class="cmd" x="135" y="1046">curl .../install.sh | sh</text>
+  <text class="cmd" x="135" y="1080">wget -qO- .../install.sh | sh</text>
+  <text class="small" x="135" y="1116">没有 curl 时用 wget 备用</text>
 
   <rect class="card" x="670" y="970" rx="18" ry="18" width="560" height="170" />
-  <text class="num" x="695" y="1008">2. 装落地机器</text>
-  <text class="cmd" x="695" y="1046">PROFILE=home-alpine HOME_MODE=ss2022</text>
-  <text class="cmd" x="695" y="1080">PROFILE=home-alpine HOME_MODE=both</text>
-  <text class="small" x="695" y="1116">输出 /root/home-singbox-info.txt</text>
+  <text class="num" x="695" y="1008">2. 菜单选择安装类型</text>
+  <text class="cmd" x="695" y="1046">1 DMIT入口 / 2 HK入口</text>
+  <text class="cmd" x="695" y="1080">3 SS2022 / 4 Reality+SS2022</text>
+  <text class="small" x="695" y="1116">home 自动识别 Debian/Alpine</text>
 
   <rect class="card" x="1270" y="970" rx="18" ry="18" width="480" height="170" />
   <text class="num" x="1295" y="1008">3. 复制 ss_link</text>

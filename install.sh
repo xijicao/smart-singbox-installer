@@ -46,7 +46,15 @@ detect_os_id() {
 fetch_file() {
   src="$1"
   dst="$2"
-  curl -fsSL "${REPO_RAW_BASE}/${src}" -o "${dst}"
+  url="${REPO_RAW_BASE}/${src}"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "${url}" -o "${dst}"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "${dst}" "${url}"
+  else
+    die "curl or wget is required to fetch installer files."
+  fi
 }
 
 prepare_bundle() {
@@ -78,15 +86,11 @@ prepare_bundle() {
 print_menu() {
   echo
   echo "Detected OS: ${OS_ID} (${OS_FAMILY})"
-  echo "Choose profile:"
-
-  if [ "${OS_FAMILY}" = "debian" ]; then
-    echo "  1) dmit-debian    DMIT main Reality entry + ss:// relay importer"
-    echo "  2) hk-debian      HK main Reality entry + ss:// relay importer"
-    echo "  3) home-debian    landing/transit machine: ss2022/reality/both"
-  else
-    echo "  1) home-alpine    landing/transit machine: ss2022/reality/both"
-  fi
+  echo "Choose what to install:"
+  echo "  1) DMIT entry machine"
+  echo "  2) HK entry machine"
+  echo "  3) Home/landing machine - SS2022 only"
+  echo "  4) Home/landing machine - Reality + SS2022"
   echo
 }
 
@@ -96,7 +100,7 @@ read_choice() {
     printf "Enter choice: " > /dev/tty
     read -r choice < /dev/tty
   else
-    die "No interactive TTY found. Please set PROFILE=..."
+    die "No interactive TTY found. Please run this one-command installer from an interactive SSH terminal."
   fi
 }
 
@@ -105,19 +109,33 @@ choose_profile() {
     PROFILE_ID="${PROFILE}"
   else
     read_choice
-    if [ "${OS_FAMILY}" = "debian" ]; then
-      case "${choice}" in
-        1) PROFILE_ID="dmit-debian" ;;
-        2) PROFILE_ID="hk-debian" ;;
-        3) PROFILE_ID="home-debian" ;;
-        *) die "Invalid choice: ${choice}" ;;
-      esac
-    else
-      case "${choice}" in
-        1) PROFILE_ID="home-alpine" ;;
-        *) die "Invalid choice: ${choice}" ;;
-      esac
-    fi
+    case "${choice}" in
+      1)
+        [ "${OS_FAMILY}" = "debian" ] || die "DMIT entry machine requires Debian/Ubuntu. Current OS: ${OS_ID}."
+        PROFILE_ID="dmit-debian"
+        ;;
+      2)
+        [ "${OS_FAMILY}" = "debian" ] || die "HK entry machine requires Debian/Ubuntu. Current OS: ${OS_ID}."
+        PROFILE_ID="hk-debian"
+        ;;
+      3)
+        case "${OS_FAMILY}" in
+          debian) PROFILE_ID="home-debian" ;;
+          alpine) PROFILE_ID="home-alpine" ;;
+          *) die "Home/landing machine requires Debian/Ubuntu/Alpine. Current OS: ${OS_ID}." ;;
+        esac
+        HOME_MODE="${HOME_MODE:-ss2022}"
+        ;;
+      4)
+        case "${OS_FAMILY}" in
+          debian) PROFILE_ID="home-debian" ;;
+          alpine) PROFILE_ID="home-alpine" ;;
+          *) die "Home/landing machine requires Debian/Ubuntu/Alpine. Current OS: ${OS_ID}." ;;
+        esac
+        HOME_MODE="${HOME_MODE:-both}"
+        ;;
+      *) die "Invalid choice: ${choice}" ;;
+    esac
   fi
 
   case "${PROFILE_ID}" in

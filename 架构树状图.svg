@@ -69,17 +69,17 @@
   <text class="pillText" x="900" y="300" text-anchor="middle">家宽 / LXC / NAT / IPLC 都归这里</text>
 
   <rect class="card2" x="680" y="340" rx="22" ry="22" width="440" height="145" />
-  <text class="label" x="705" y="380">PROFILE=home-alpine</text>
-  <text class="text" x="705" y="420">• Alpine 家宽、NAT、LXC、IPLC</text>
-  <text class="text" x="705" y="455">• 无 SFTP 也能一行命令安装</text>
+  <text class="label" x="705" y="380">菜单 3：只装 SS2022</text>
+  <text class="text" x="705" y="420">• 家宽、NAT、LXC、IPLC 落地</text>
+  <text class="text" x="705" y="455">• 输出 ss_link 给 DMIT/HK 导入</text>
 
   <rect class="card2" x="680" y="515" rx="22" ry="22" width="440" height="125" />
-  <text class="label" x="705" y="555">PROFILE=home-debian</text>
-  <text class="text" x="705" y="595">• Debian 落地或中转机器</text>
-  <text class="text" x="705" y="625">• 同样输出链接和信息文件</text>
+  <text class="label" x="705" y="555">菜单 4：Reality + SS2022</text>
+  <text class="text" x="705" y="595">• 直连质量好就这样装</text>
+  <text class="text" x="705" y="625">• 自动识别 Debian/Alpine</text>
 
   <rect class="card" x="680" y="675" rx="22" ry="22" width="440" height="260" />
-  <text class="label" x="705" y="715">HOME_MODE 怎么选</text>
+  <text class="label" x="705" y="715">端口和链接怎么处理</text>
   <text class="text" x="705" y="755">• ss2022：只做落地</text>
   <text class="small" x="735" y="785">输出 ss_link，给 DMIT/HK 导入</text>
   <text class="text" x="705" y="822">• reality：只做直连</text>

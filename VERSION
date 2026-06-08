@@ -1,10 +1,9 @@
-smart-singbox-installer 2026-06-08.4
+smart-singbox-installer 2026-06-08.5
 
 Changes:
-- Active profiles: dmit-debian, hk-debian, home-debian, home-alpine.
-- Home profiles support SS2022, Reality, or both.
-- NAT/LXC installs keep internal listen ports stable; use ss_link_editable to hand-edit the public mapped port before importing to HK/DMIT.
-- DMIT/HK can paste ss:// landing links and generate Reality relay links.
-- sb/-sb manages base link regeneration, relay listing, relay deletion, link display, config backup/restore, and sing-box core updates.
-- Home profiles install sing-box-uninstall for safe removal with a pre-uninstall backup.
-- GitHub Actions runs tools/self-check.sh on push and pull request.
+- One-command interactive installer is now the primary workflow.
+- All machines can run: curl -fsSL https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh | sh
+- Installer menu now shows four fixed choices: DMIT entry, HK entry, Home SS2022 only, Home Reality + SS2022.
+- Home options auto-select home-debian or home-alpine based on the detected OS.
+- Internal file fetch now supports curl first, wget fallback.
+- Docs and mind map were updated to remove PROFILE-heavy normal usage and focus on the one-command menu flow.
