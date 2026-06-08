@@ -183,6 +183,65 @@ EOF
   chmod 700 "${uninstall_path}"
 }
 
+write_entry_uninstall_script() {
+  uninstall_path="/usr/local/bin/sing-box-entry-uninstall"
+  cat > "${uninstall_path}" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run as root." >&2
+  exit 1
+fi
+
+if [ "${FORCE_UNINSTALL_ENTRY:-0}" != "1" ]; then
+  if [ -r /dev/tty ]; then
+    echo "This will stop sing-box and remove the DMIT/HK entry install." > /dev/tty
+    echo "It removes config, service file, info files, relay importer, sb manager and /usr/local/bin/sing-box." > /dev/tty
+    echo "It does not remove apt packages or restore the whole OS to factory state." > /dev/tty
+    printf "Type UNINSTALL_ENTRY to continue: " > /dev/tty
+    read -r confirm < /dev/tty
+    [ "${confirm}" = "UNINSTALL_ENTRY" ] || { echo "Cancelled."; exit 0; }
+  else
+    echo "No TTY found. Run with FORCE_UNINSTALL_ENTRY=1 to uninstall non-interactively." >&2
+    exit 1
+  fi
+fi
+
+backup_path="/root/sing-box-entry-uninstall-backup-$(date +%Y%m%d%H%M%S).tar.gz"
+tar -czf "${backup_path}" \
+  /etc/sing-box \
+  /root/dmit-singbox-info.txt \
+  /root/hk-singbox-info.txt \
+  /etc/systemd/system/sing-box.service \
+  /usr/local/bin/sing-box \
+  /usr/local/bin/sing-box-add-ss2022-relay \
+  /usr/local/bin/sb \
+  /usr/local/bin/-sb 2>/dev/null || true
+chmod 600 "${backup_path}" 2>/dev/null || true
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl stop sing-box >/dev/null 2>&1 || true
+  systemctl disable sing-box >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/sing-box.service
+  systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+rm -rf /etc/sing-box
+rm -f /root/dmit-singbox-info.txt
+rm -f /root/hk-singbox-info.txt
+rm -f /usr/local/bin/sing-box
+rm -f /usr/local/bin/sing-box-add-ss2022-relay
+rm -f /usr/local/bin/sb
+rm -f /usr/local/bin/-sb
+rm -f /usr/local/bin/sing-box-entry-uninstall
+
+echo "sing-box entry install removed."
+echo "Backup, if any files existed: ${backup_path}"
+EOF
+  chmod 700 "${uninstall_path}"
+}
+
 random_uuid() {
   if [ -r /proc/sys/kernel/random/uuid ]; then
     cat /proc/sys/kernel/random/uuid

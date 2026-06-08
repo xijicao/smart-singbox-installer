@@ -32,6 +32,19 @@ wget -qO- https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main
 
 选 `3` 或 `4` 时，脚本会自动识别 Debian/Ubuntu/Alpine，自动选对应 sing-box 包。Alpine 会优先用 musl 包，Debian/Ubuntu 会优先用 glibc 包，对应包不行再退到通用包。
 
+选 `4` 时还会让你选择 Reality 握手/SNI 地区：
+
+```text
+1) JP - www.sony.jp
+2) TW - www.cht.com.tw
+3) HK - www.hkex.com.hk
+4) US - reed.edu
+5) EU - www.siemens.com
+6) Custom domain
+```
+
+日本机器选 `1`，台湾机器选 `2`。如果你自己测到了更好的目标域名，选 `6` 手动输入纯域名，不要带 `https://`。
+
 ## 2. 查看安装后输出
 
 DMIT：
@@ -146,7 +159,33 @@ sb restore-latest
 sb update-core
 ```
 
-## 6. Home 落地卸载
+注意：`sb` 的第 `3` 项只是删除某个 `relay-*` 家宽落地中转节点，不会卸载 DMIT/HK 入口机。
+
+## 6. DMIT/HK 入口机整机卸载
+
+只在 DMIT/HK 入口机上用：
+
+```sh
+sing-box-entry-uninstall
+```
+
+执行前会要求输入：
+
+```text
+UNINSTALL_ENTRY
+```
+
+它会先备份到：
+
+```text
+/root/sing-box-entry-uninstall-backup-*.tar.gz
+```
+
+然后删除这套入口机 sing-box 服务、配置、info 文件、`sing-box-add-ss2022-relay`、`sb`、`-sb` 和 `/usr/local/bin/sing-box`。
+
+它不会卸载 apt 依赖包，也不是完整恢复机器初始状态。
+
+## 7. Home 落地卸载
 
 只在 home 落地机器上用：
 
@@ -155,3 +194,5 @@ sing-box-uninstall
 ```
 
 执行前会要求输入 `UNINSTALL`，并先打包备份。
+
+它会删除 home 落地机器上的 sing-box 服务、配置、healthcheck、info 文件和 `/usr/local/bin/sing-box`。它不会卸载系统依赖包，也不是完整恢复机器初始状态。

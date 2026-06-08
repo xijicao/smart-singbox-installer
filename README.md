@@ -36,6 +36,19 @@ wget -qO- https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main
 
 选 `3` 或 `4` 时，脚本会自动识别 Debian/Ubuntu/Alpine。Debian/Ubuntu 优先下载 glibc 包，Alpine 优先下载 musl 包；对应包失败后只退到通用包，不乱试其它系统包。
 
+选 `4` 安装 Reality + SS2022 时，会额外选择 Reality 握手/SNI 地区：
+
+```text
+1) JP - www.sony.jp
+2) TW - www.cht.com.tw
+3) HK - www.hkex.com.hk
+4) US - reed.edu
+5) EU - www.siemens.com
+6) Custom domain
+```
+
+日本机器选 `1`，台湾机器选 `2`。如果你自己用 curl/openssl 测到了更合适的目标域名，选 `6` 输入纯域名即可。
+
 ## 最终架构
 
 只分两类机器：
@@ -66,6 +79,7 @@ DMIT/HK 安装后都会有：
 sing-box-add-ss2022-relay
 sb
 -sb
+sing-box-entry-uninstall
 ```
 
 ## 落地/中转机器
@@ -85,6 +99,16 @@ Home/landing machine - Reality + SS2022
 ```
 
 同时安装直连 Reality 和 SS2022 落地，适合性能和直连质量都还行的机器。
+
+Reality 目标域名按地区选择，默认候选是：
+
+```text
+JP: www.sony.jp
+TW: www.cht.com.tw
+HK: www.hkex.com.hk
+US: reed.edu
+EU: www.siemens.com
+```
 
 安装完会自动生成：
 
@@ -186,6 +210,26 @@ sb
 
 删除家宽落地时，选择第 `3` 项即可。脚本会自动删除对应 Reality 用户、SS2022 outbound 和 route 规则，并在修改前备份配置。
 
+注意：`sb` 的第 `3` 项只是删除某个 `relay-*` 家宽落地中转节点，不会卸载 DMIT/HK 入口机本身。
+
+## 入口机整机卸载
+
+DMIT/HK 入口机安装后会有：
+
+```sh
+sing-box-entry-uninstall
+```
+
+执行前需要输入 `UNINSTALL_ENTRY` 确认，并会先打包备份到：
+
+```text
+/root/sing-box-entry-uninstall-backup-*.tar.gz
+```
+
+它会删除这套入口机 sing-box 服务、`/etc/sing-box`、`/root/dmit-singbox-info.txt`、`/root/hk-singbox-info.txt`、`sing-box-add-ss2022-relay`、`sb`、`-sb` 和 `/usr/local/bin/sing-box`。
+
+它不会卸载 apt 依赖包，也不是把系统恢复到刚买机器的初始状态。
+
 ## Home 落地卸载
 
 home 落地机器安装后会有：
@@ -195,6 +239,8 @@ sing-box-uninstall
 ```
 
 执行前需要输入 `UNINSTALL` 确认，并会先打包备份到 `/root/sing-box-uninstall-backup-*.tar.gz`。
+
+它会删除 home 落地机器上的 sing-box 服务、配置、healthcheck、info 文件和 `/usr/local/bin/sing-box`。它同样不会卸载系统依赖包，也不是完整恢复系统初始状态。
 
 ## 安全
 

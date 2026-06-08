@@ -1,6 +1,12 @@
-smart-singbox-installer 2026-06-08.5
+smart-singbox-installer 2026-06-08.7
 
 Changes:
+- DMIT/HK entry profiles now install sing-box-entry-uninstall for full entry-install removal with backup.
+- Entry uninstall requires UNINSTALL_ENTRY confirmation and removes entry config, service, info files, relay importer, sb manager and sing-box binary.
+- Docs now clearly separate relay deletion, entry uninstall and home uninstall.
+- Home Reality installs now ask for a regional Reality handshake/SNI target instead of defaulting to Cloudflare.
+- Regional SNI choices: JP www.sony.jp, TW www.cht.com.tw, HK www.hkex.com.hk, US reed.edu, EU www.siemens.com, or custom.
+- Custom Reality SNI input is validated as a plain domain.
 - One-command interactive installer is now the primary workflow.
 - All machines can run: curl -fsSL https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh | sh
 - Installer menu now shows four fixed choices: DMIT entry, HK entry, Home SS2022 only, Home Reality + SS2022.
