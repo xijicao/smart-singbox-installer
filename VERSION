@@ -1,6 +1,7 @@
-smart-singbox-installer 2026-06-08.9
+smart-singbox-installer 2026-06-08.10
 
 Changes:
+- README and quick command docs now include a daily operation index for install, checks, relay import, deletion, uninstall and restore.
 - Home installs now include sing-box-restore for restoring the latest or specified home uninstall backup.
 - DMIT/HK entry installs now include sing-box-entry-restore for restoring the latest or specified entry uninstall backup.
 - Restore commands create a pre-restore backup, extract the selected backup, check config and restart sing-box.

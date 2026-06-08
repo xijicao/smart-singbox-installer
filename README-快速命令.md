@@ -1,5 +1,28 @@
 # 快速命令
 
+## 日常操作索引
+
+```text
+新装机器：看第 1 节
+查看安装输出：看第 2 节
+装完自检：看第 3 节
+home SS2022 导入 DMIT/HK：看第 4 节
+NAT/LXC 改公网端口：看第 5 节
+DMIT/HK 删除 relay、备份、恢复、更新 core：看第 6 节
+DMIT/HK 整机卸载/恢复：看第 7 节
+Home 落地卸载/恢复：看第 8 节
+```
+
+最常用命令：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh | sh
+sing-box version
+sing-box check -c /etc/sing-box/config.json
+sb
+sing-box-add-ss2022-relay
+```
+
 ## 1. 唯一需要记的安装命令
 
 所有机器都用这一条：
