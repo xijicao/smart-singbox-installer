@@ -183,6 +183,70 @@ EOF
   chmod 700 "${uninstall_path}"
 }
 
+write_home_restore_script() {
+  restore_path="/usr/local/bin/sing-box-restore"
+  cat > "${restore_path}" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run as root." >&2
+  exit 1
+fi
+
+backup_path="${1:-}"
+if [ -z "${backup_path}" ]; then
+  backup_path="$(ls -1t /root/sing-box-uninstall-backup-*.tar.gz 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "${backup_path}" ] || [ ! -r "${backup_path}" ]; then
+  echo "No readable home uninstall backup found. You can pass one explicitly:" >&2
+  echo "  sing-box-restore /root/sing-box-uninstall-backup-YYYYMMDDHHMMSS.tar.gz" >&2
+  exit 1
+fi
+
+pre_restore="/root/sing-box-pre-restore-backup-$(date +%Y%m%d%H%M%S).tar.gz"
+tar -czf "${pre_restore}" \
+  /etc/sing-box \
+  /root/home-singbox-info.txt \
+  /etc/systemd/system/sing-box.service \
+  /etc/init.d/sing-box \
+  /etc/periodic/15min/sing-box-healthcheck \
+  /usr/local/bin/sing-box-healthcheck \
+  /usr/local/bin/sing-box \
+  /usr/local/bin/sing-box-uninstall \
+  /usr/local/bin/sing-box-restore 2>/dev/null || true
+chmod 600 "${pre_restore}" 2>/dev/null || true
+
+tar -xzf "${backup_path}" -C /
+
+chmod 755 /usr/local/bin/sing-box 2>/dev/null || true
+chmod 700 /usr/local/bin/sing-box-uninstall /usr/local/bin/sing-box-restore 2>/dev/null || true
+chmod 755 /usr/local/bin/sing-box-healthcheck 2>/dev/null || true
+chmod 755 /etc/init.d/sing-box 2>/dev/null || true
+chmod 600 /etc/sing-box/config.json /root/home-singbox-info.txt 2>/dev/null || true
+
+if [ -x /usr/local/bin/sing-box ] && [ -r /etc/sing-box/config.json ]; then
+  /usr/local/bin/sing-box check -c /etc/sing-box/config.json
+fi
+
+if command -v systemctl >/dev/null 2>&1 && [ -r /etc/systemd/system/sing-box.service ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable sing-box >/dev/null 2>&1 || true
+  systemctl restart sing-box
+elif command -v rc-service >/dev/null 2>&1 && [ -x /etc/init.d/sing-box ]; then
+  rc-update add crond default >/dev/null 2>&1 || true
+  rc-service crond start >/dev/null 2>&1 || true
+  rc-update add sing-box default >/dev/null 2>&1 || true
+  rc-service sing-box restart
+fi
+
+echo "sing-box home install restored from: ${backup_path}"
+echo "Pre-restore backup saved to: ${pre_restore}"
+EOF
+  chmod 700 "${restore_path}"
+}
+
 write_entry_uninstall_script() {
   uninstall_path="/usr/local/bin/sing-box-entry-uninstall"
   cat > "${uninstall_path}" <<'EOF'
@@ -240,6 +304,64 @@ echo "sing-box entry install removed."
 echo "Backup, if any files existed: ${backup_path}"
 EOF
   chmod 700 "${uninstall_path}"
+}
+
+write_entry_restore_script() {
+  restore_path="/usr/local/bin/sing-box-entry-restore"
+  cat > "${restore_path}" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run as root." >&2
+  exit 1
+fi
+
+backup_path="${1:-}"
+if [ -z "${backup_path}" ]; then
+  backup_path="$(ls -1t /root/sing-box-entry-uninstall-backup-*.tar.gz 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "${backup_path}" ] || [ ! -r "${backup_path}" ]; then
+  echo "No readable entry uninstall backup found. You can pass one explicitly:" >&2
+  echo "  sing-box-entry-restore /root/sing-box-entry-uninstall-backup-YYYYMMDDHHMMSS.tar.gz" >&2
+  exit 1
+fi
+
+pre_restore="/root/sing-box-entry-pre-restore-backup-$(date +%Y%m%d%H%M%S).tar.gz"
+tar -czf "${pre_restore}" \
+  /etc/sing-box \
+  /root/dmit-singbox-info.txt \
+  /root/hk-singbox-info.txt \
+  /etc/systemd/system/sing-box.service \
+  /usr/local/bin/sing-box \
+  /usr/local/bin/sing-box-add-ss2022-relay \
+  /usr/local/bin/sb \
+  /usr/local/bin/-sb \
+  /usr/local/bin/sing-box-entry-uninstall \
+  /usr/local/bin/sing-box-entry-restore 2>/dev/null || true
+chmod 600 "${pre_restore}" 2>/dev/null || true
+
+tar -xzf "${backup_path}" -C /
+
+chmod 755 /usr/local/bin/sing-box 2>/dev/null || true
+chmod 700 /usr/local/bin/sing-box-add-ss2022-relay /usr/local/bin/sb /usr/local/bin/-sb /usr/local/bin/sing-box-entry-uninstall /usr/local/bin/sing-box-entry-restore 2>/dev/null || true
+chmod 600 /etc/sing-box/config.json /etc/sing-box/reality-meta.env /root/dmit-singbox-info.txt /root/hk-singbox-info.txt 2>/dev/null || true
+
+if [ -x /usr/local/bin/sing-box ] && [ -r /etc/sing-box/config.json ]; then
+  /usr/local/bin/sing-box check -c /etc/sing-box/config.json
+fi
+
+if command -v systemctl >/dev/null 2>&1 && [ -r /etc/systemd/system/sing-box.service ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable sing-box >/dev/null 2>&1 || true
+  systemctl restart sing-box
+fi
+
+echo "sing-box entry install restored from: ${backup_path}"
+echo "Pre-restore backup saved to: ${pre_restore}"
+EOF
+  chmod 700 "${restore_path}"
 }
 
 random_uuid() {

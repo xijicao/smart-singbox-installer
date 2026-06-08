@@ -1,6 +1,9 @@
-smart-singbox-installer 2026-06-08.8
+smart-singbox-installer 2026-06-08.9
 
 Changes:
+- Home installs now include sing-box-restore for restoring the latest or specified home uninstall backup.
+- DMIT/HK entry installs now include sing-box-entry-restore for restoring the latest or specified entry uninstall backup.
+- Restore commands create a pre-restore backup, extract the selected backup, check config and restart sing-box.
 - Docs now include post-install check commands for sing-box version, config validation, service status and info output.
 - DMIT/HK entry profiles now install sing-box-entry-uninstall for full entry-install removal with backup.
 - Entry uninstall requires UNINSTALL_ENTRY confirmation and removes entry config, service, info files, relay importer, sb manager and sing-box binary.

@@ -393,6 +393,7 @@ profile_main() {
   if json_bool_mode_has_reality; then ports="${ports} ${REALITY_PORT}"; fi
   write_alpine_healthcheck "${ports}"
   write_home_uninstall_script
+  write_home_restore_script
   enable_openrc_singbox
   profile_home_write_info
   profile_home_finish

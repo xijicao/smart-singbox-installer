@@ -389,6 +389,7 @@ profile_main() {
   profile_home_write_config
   write_systemd_service
   write_home_uninstall_script
+  write_home_restore_script
   maybe_enable_nftables_443
   enable_systemd_singbox
   profile_home_write_info

@@ -252,6 +252,20 @@ sing-box-entry-uninstall
 
 它不会卸载 apt 依赖包，也不是把系统恢复到刚买机器的初始状态。
 
+恢复最近一次入口机卸载备份：
+
+```sh
+sing-box-entry-restore
+```
+
+指定某个备份恢复：
+
+```sh
+sing-box-entry-restore /root/sing-box-entry-uninstall-backup-YYYYMMDDHHMMSS.tar.gz
+```
+
+恢复前会先生成一份当前状态备份到 `/root/sing-box-entry-pre-restore-backup-*.tar.gz`，然后解压备份、检查配置并重启 sing-box。
+
 ## Home 落地卸载
 
 home 落地机器安装后会有：
@@ -263,6 +277,20 @@ sing-box-uninstall
 执行前需要输入 `UNINSTALL` 确认，并会先打包备份到 `/root/sing-box-uninstall-backup-*.tar.gz`。
 
 它会删除 home 落地机器上的 sing-box 服务、配置、healthcheck、info 文件和 `/usr/local/bin/sing-box`。它同样不会卸载系统依赖包，也不是完整恢复系统初始状态。
+
+恢复最近一次 home 卸载备份：
+
+```sh
+sing-box-restore
+```
+
+指定某个备份恢复：
+
+```sh
+sing-box-restore /root/sing-box-uninstall-backup-YYYYMMDDHHMMSS.tar.gz
+```
+
+恢复前会先生成一份当前状态备份到 `/root/sing-box-pre-restore-backup-*.tar.gz`，然后解压备份、检查配置并重启 sing-box。
 
 ## 安全
 
