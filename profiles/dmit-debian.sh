@@ -153,6 +153,7 @@ profile_show_finish() {
   echo "Client info: ${INFO_PATH}"
   echo "Relay importer: /usr/local/bin/sing-box-add-ss2022-relay"
   echo "Manager menu: sb or -sb"
+  echo "Entry uninstall: /usr/local/bin/sing-box-entry-uninstall"
   echo
   echo "Useful checks:"
   echo "systemctl status sing-box --no-pager"
@@ -177,6 +178,7 @@ profile_main() {
   write_reality_meta
   write_ss2022_relay_importer
   write_sb_manager
+  write_entry_uninstall_script
   profile_write_info
   profile_show_finish
 }
