@@ -67,7 +67,36 @@ cat /root/home-singbox-info.txt
 
 这些 info 文件默认 `600` 权限，只有 root 能读。
 
-## 3. 把家宽 SS2022 导入到 DMIT/HK
+## 3. 装完自检命令
+
+Alpine 机器运行：
+
+```sh
+sing-box version
+sing-box check -c /etc/sing-box/config.json
+rc-service sing-box status
+cat /root/home-singbox-info.txt
+```
+
+Debian/Ubuntu 机器运行：
+
+```sh
+sing-box version
+sing-box check -c /etc/sing-box/config.json
+systemctl status sing-box --no-pager
+cat /root/dmit-singbox-info.txt 2>/dev/null || cat /root/hk-singbox-info.txt 2>/dev/null || cat /root/home-singbox-info.txt
+```
+
+含义：
+
+```text
+sing-box version  查看 sing-box 版本
+sing-box check    检查配置文件是否正确
+status            检查服务是否正在运行
+cat info          查看节点链接、端口、密码、SNI
+```
+
+## 4. 把家宽 SS2022 导入到 DMIT/HK
 
 先在 home 落地机器上复制：
 
@@ -93,7 +122,7 @@ sing-box-add-ss2022-relay
 
 粘贴 `ss://` 链接，脚本会自动返回一个新的 `vless://` Reality 中转链接。
 
-## 4. NAT/LXC 端口映射怎么改
+## 5. NAT/LXC 端口映射怎么改
 
 比如面板是：
 
@@ -125,7 +154,7 @@ ss://method:password@server:24496#jp-home-SS2022
 公网 TCP 24497 -> 容器 TCP 8443  # Reality
 ```
 
-## 5. DMIT/HK 统一管理菜单
+## 6. DMIT/HK 统一管理菜单
 
 在 DMIT 或 HK 上运行：
 
@@ -161,7 +190,7 @@ sb update-core
 
 注意：`sb` 的第 `3` 项只是删除某个 `relay-*` 家宽落地中转节点，不会卸载 DMIT/HK 入口机。
 
-## 6. DMIT/HK 入口机整机卸载
+## 7. DMIT/HK 入口机整机卸载
 
 只在 DMIT/HK 入口机上用：
 
@@ -185,7 +214,7 @@ UNINSTALL_ENTRY
 
 它不会卸载 apt 依赖包，也不是完整恢复机器初始状态。
 
-## 7. Home 落地卸载
+## 8. Home 落地卸载
 
 只在 home 落地机器上用：
 

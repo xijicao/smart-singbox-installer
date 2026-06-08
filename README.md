@@ -128,6 +128,28 @@ ss://method:password@server:port#name
 
 普通公网机器直接复制 `ss_link`。NAT/LXC 端口映射机器建议复制 `ss_link_editable`，把端口改成面板公网端口后再导入 DMIT/HK。
 
+## 装完自检
+
+Alpine 机器：
+
+```sh
+sing-box version
+sing-box check -c /etc/sing-box/config.json
+rc-service sing-box status
+cat /root/home-singbox-info.txt
+```
+
+Debian/Ubuntu 机器：
+
+```sh
+sing-box version
+sing-box check -c /etc/sing-box/config.json
+systemctl status sing-box --no-pager
+cat /root/dmit-singbox-info.txt 2>/dev/null || cat /root/hk-singbox-info.txt 2>/dev/null || cat /root/home-singbox-info.txt
+```
+
+这些命令分别用于查看 sing-box 版本、检查配置、确认服务运行状态、查看节点链接和敏感信息文件。
+
 ## 导入落地到 DMIT/HK
 
 在落地机器上：

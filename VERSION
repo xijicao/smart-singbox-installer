@@ -1,6 +1,7 @@
-smart-singbox-installer 2026-06-08.7
+smart-singbox-installer 2026-06-08.8
 
 Changes:
+- Docs now include post-install check commands for sing-box version, config validation, service status and info output.
 - DMIT/HK entry profiles now install sing-box-entry-uninstall for full entry-install removal with backup.
 - Entry uninstall requires UNINSTALL_ENTRY confirmation and removes entry config, service, info files, relay importer, sb manager and sing-box binary.
 - Docs now clearly separate relay deletion, entry uninstall and home uninstall.
