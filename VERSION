@@ -1,6 +1,9 @@
-smart-singbox-installer 2026-06-08.10
+smart-singbox-installer 2026-06-08.11
 
 Changes:
+- DMIT/HK entry installs now enable nftables by default with IPv4/IPv6 inbound limited to TCP 51398, TCP 443 and ICMP.
+- Entry nftables setup requires SSH to already be listening on TCP 51398 before writing firewall rules.
+- Home landing installs still skip nftables by default to avoid NAT/LXC panel port mapping conflicts.
 - README and quick command docs now include a daily operation index for install, checks, relay import, deletion, uninstall and restore.
 - Home installs now include sing-box-restore for restoring the latest or specified home uninstall backup.
 - DMIT/HK entry installs now include sing-box-entry-restore for restoring the latest or specified entry uninstall backup.

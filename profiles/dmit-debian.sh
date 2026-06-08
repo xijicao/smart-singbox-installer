@@ -155,6 +155,7 @@ profile_show_finish() {
   echo "Manager menu: sb or -sb"
   echo "Entry uninstall: /usr/local/bin/sing-box-entry-uninstall"
   echo "Entry restore: /usr/local/bin/sing-box-entry-restore"
+  echo "Entry firewall: nftables allows IPv4/IPv6 TCP 51398 and TCP 443"
   echo
   echo "Useful checks:"
   echo "systemctl status sing-box --no-pager"
@@ -174,7 +175,7 @@ profile_main() {
   detect_access_host
   profile_write_config
   write_systemd_service
-  maybe_enable_nftables_443
+  enable_entry_nftables_443
   enable_systemd_singbox
   write_reality_meta
   write_ss2022_relay_importer

@@ -53,6 +53,18 @@ wget -qO- https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main
 3. 家宽、NAT、LXC、IPLC 只做 SS2022 落地：选 `3`
 4. 家宽、NAT、LXC、IPLC 同时直连 Reality + SS2022 落地：选 `4`
 
+重要：DMIT/HK 入口机默认会启用 nftables 防火墙。安装前先把 SSH 改到 `51398`，并确认你能用 `51398` 登录。
+
+入口机默认放行 IPv4/IPv6：
+
+```text
+TCP 51398  # SSH
+TCP 443    # Reality
+ICMP / IPv6 ICMP
+```
+
+其它入站默认 drop。Home 家宽/NAT/LXC 机器不会默认启用 nftables。
+
 选 `3` 或 `4` 时，脚本会自动识别 Debian/Ubuntu/Alpine，自动选对应 sing-box 包。Alpine 会优先用 musl 包，Debian/Ubuntu 会优先用 glibc 包，对应包不行再退到通用包。
 
 选 `4` 时还会让你选择 Reality 握手/SNI 地区：
@@ -110,6 +122,12 @@ systemctl status sing-box --no-pager
 cat /root/dmit-singbox-info.txt 2>/dev/null || cat /root/hk-singbox-info.txt 2>/dev/null || cat /root/home-singbox-info.txt
 ```
 
+DMIT/HK 入口机再看防火墙：
+
+```sh
+nft list ruleset | grep -E '51398|443'
+```
+
 含义：
 
 ```text
@@ -117,6 +135,7 @@ sing-box version  查看 sing-box 版本
 sing-box check    检查配置文件是否正确
 status            检查服务是否正在运行
 cat info          查看节点链接、端口、密码、SNI
+nft list ruleset  查看入口机防火墙是否放行 SSH 51398 和 Reality 443
 ```
 
 ## 4. 把家宽 SS2022 导入到 DMIT/HK

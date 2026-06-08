@@ -541,6 +541,23 @@ EOF
   systemctl restart nftables
 }
 
+enable_entry_nftables_443() {
+  SSH_PORT="51398"
+  ENABLE_NFTABLES="1"
+
+  if command -v ss >/dev/null 2>&1; then
+    if ! ss -lnpt 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${SSH_PORT}$"; then
+      if [ "${SKIP_SSH_PORT_CHECK:-0}" != "1" ]; then
+        fail "SSH port ${SSH_PORT} is not listening. Move SSH to ${SSH_PORT} first, then rerun. Set SKIP_SSH_PORT_CHECK=1 only if you are certain."
+      fi
+      log "WARNING: SSH port ${SSH_PORT} was not detected, but SKIP_SSH_PORT_CHECK=1 is set."
+    fi
+  fi
+
+  maybe_enable_nftables_443
+  log "entry nftables firewall enabled for IPv4/IPv6: SSH ${SSH_PORT}, TCP 443."
+}
+
 write_info_file() {
   info_path="$1"
   chmod 600 "${info_path}"
