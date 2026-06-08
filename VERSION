@@ -1,0 +1,10 @@
+smart-singbox-installer 2026-06-08.4
+
+Changes:
+- Active profiles: dmit-debian, hk-debian, home-debian, home-alpine.
+- Home profiles support SS2022, Reality, or both.
+- NAT/LXC installs keep internal listen ports stable; use ss_link_editable to hand-edit the public mapped port before importing to HK/DMIT.
+- DMIT/HK can paste ss:// landing links and generate Reality relay links.
+- sb/-sb manages base link regeneration, relay listing, relay deletion, link display, config backup/restore, and sing-box core updates.
+- Home profiles install sing-box-uninstall for safe removal with a pre-uninstall backup.
+- GitHub Actions runs tools/self-check.sh on push and pull request.

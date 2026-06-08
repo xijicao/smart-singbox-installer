@@ -1,0 +1,11 @@
+# generated secrets / runtime output
+*.env
+.env
+*-info.txt
+*singbox-info.txt
+*.key
+*.pem
+
+# local scratch
+.DS_Store
+Thumbs.db
