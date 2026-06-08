@@ -2,7 +2,7 @@
 set -eu
 
 # Change this after uploading the folder to GitHub.
-REPO_RAW_BASE_DEFAULT="https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/main"
+REPO_RAW_BASE_DEFAULT="https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main"
 REPO_RAW_BASE="${REPO_RAW_BASE:-${REPO_RAW_BASE_DEFAULT}}"
 
 TMP_DIR=""
