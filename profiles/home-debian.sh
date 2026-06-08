@@ -3,7 +3,7 @@
 profile_home_defaults() {
   HOME_NODE_NAME="${HOME_NODE_NAME:-home}"
   HOME_MODE="${HOME_MODE:-}"
-  REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-www.cloudflare.com}"
+  REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-}"
   ACCESS_HOST_FALLBACK="YOUR_HOME_IP_OR_DOMAIN"
 
   SS2022_METHOD="${SS2022_METHOD:-2022-blake3-aes-256-gcm}"
@@ -40,10 +40,60 @@ choose_home_mode() {
   esac
 }
 
+choose_reality_server_name() {
+  if ! json_bool_mode_has_reality; then
+    return
+  fi
+
+  if [ -n "${REALITY_SERVER_NAME}" ]; then
+    return
+  fi
+
+  if [ ! -r /dev/tty ]; then
+    REALITY_SERVER_NAME="www.sony.jp"
+    return
+  fi
+
+  echo "Choose Reality handshake/SNI region:" > /dev/tty
+  echo "  1) JP - www.sony.jp" > /dev/tty
+  echo "  2) TW - www.cht.com.tw" > /dev/tty
+  echo "  3) HK - www.hkex.com.hk" > /dev/tty
+  echo "  4) US - reed.edu" > /dev/tty
+  echo "  5) EU - www.siemens.com" > /dev/tty
+  echo "  6) Custom domain" > /dev/tty
+  printf "Enter choice [1]: " > /dev/tty
+  read -r sni_choice < /dev/tty
+
+  case "${sni_choice:-1}" in
+    1) REALITY_SERVER_NAME="www.sony.jp" ;;
+    2) REALITY_SERVER_NAME="www.cht.com.tw" ;;
+    3) REALITY_SERVER_NAME="www.hkex.com.hk" ;;
+    4) REALITY_SERVER_NAME="reed.edu" ;;
+    5) REALITY_SERVER_NAME="www.siemens.com" ;;
+    6)
+      printf "Enter Reality handshake/SNI domain: " > /dev/tty
+      read -r REALITY_SERVER_NAME < /dev/tty
+      ;;
+    *) fail "Invalid Reality SNI choice: ${sni_choice}" ;;
+  esac
+}
+
 validate_home_mode() {
   case "${HOME_MODE}" in
     ss2022|reality|both) ;;
     *) fail "HOME_MODE must be ss2022, reality or both." ;;
+  esac
+}
+
+validate_reality_server_name() {
+  if ! json_bool_mode_has_reality; then
+    return
+  fi
+
+  case "${REALITY_SERVER_NAME}" in
+    ''|*' '*|http://*|https://*|*/*)
+      fail "REALITY_SERVER_NAME must be a plain domain, for example www.sony.jp"
+      ;;
   esac
 }
 
@@ -328,6 +378,8 @@ profile_main() {
   profile_home_defaults
   choose_home_mode
   validate_home_mode
+  choose_reality_server_name
+  validate_reality_server_name
   validate_home_ports
   install_debian_dependencies
   install_singbox_tarball glibc
