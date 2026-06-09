@@ -1,6 +1,8 @@
-smart-singbox-installer 2026-06-08.11
+smart-singbox-installer 2026-06-09.1
 
 Changes:
+- DMIT/HK `sb` manager now supports adding and deleting direct friend Reality users with `sb add-friend NAME` and `sb delete-friend NAME`.
+- The interactive `sb` menu now includes options 8 and 9 for direct friend user management.
 - DMIT/HK entry installs now enable nftables by default with IPv4/IPv6 inbound limited to TCP 51398, TCP 443 and ICMP.
 - Entry nftables setup requires SSH to already be listening on TCP 51398 before writing firewall rules.
 - Home landing installs still skip nftables by default to avoid NAT/LXC panel port mapping conflicts.

@@ -340,6 +340,72 @@ sing-box-restore /root/sing-box-uninstall-backup-YYYYMMDDHHMMSS.tar.gz
 /etc/sing-box/reality-meta.env
 ```
 
+## DMIT/HK 朋友直连用户管理
+
+DMIT/HK 入口机的 `sb` 菜单现在支持直接添加和删除朋友 Reality 用户。
+
+交互菜单：
+
+```sh
+sb
+```
+
+然后选择：
+
+```text
+8) Add a direct friend Reality user
+9) Delete a direct friend Reality user
+```
+
+也可以直接运行：
+
+```sh
+sb add-friend alice
+sb delete-friend alice
+```
+
+推荐朋友命名可以用简单编号：
+
+```text
+me
+fr1
+fr2
+fr3
+fr4
+```
+
+例如新增 `fr4`：
+
+```sh
+sb add-friend fr4
+```
+
+删除 `fr2`：
+
+```sh
+sb delete-friend fr2
+```
+
+如果用菜单删除，`sb` 会列出现有普通直连 Reality 用户，例如：
+
+```text
+1) me
+2) fr1
+3) fr2
+4) fr3
+```
+
+输入编号即可删除对应用户。
+
+添加朋友会自动生成新的 UUID 和 short_id，写入 `/etc/sing-box/config.json`，检查配置并重启 sing-box，然后输出新的 `vless://` 导入链接。
+
+删除朋友只会删除普通直连 Reality 用户，不会删除 `relay-` 开头的家宽 relay 节点。删除前会生成配置备份：
+
+```text
+/etc/sing-box/config.json.bak.add-friend.YYYYMMDDHHMMSS
+/etc/sing-box/config.json.bak.delete-friend.YYYYMMDDHHMMSS
+```
+
 权限默认 `600`，只有 root 能读写。不要上传到 GitHub。
 
 ## GitHub 自检

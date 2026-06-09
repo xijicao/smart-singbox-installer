@@ -284,6 +284,54 @@ sing-box-uninstall
 
 执行前会要求输入 `UNINSTALL`，并先打包备份。
 
+## 9. DMIT/HK 添加和删除朋友
+
+在 DMIT 或 HK 入口机上运行：
+
+```sh
+sb
+```
+
+菜单里使用：
+
+```text
+8) Add a direct friend Reality user
+9) Delete a direct friend Reality user
+```
+
+快速命令：
+
+```sh
+sb add-friend alice
+sb delete-friend alice
+```
+
+也可以按编号命名朋友：
+
+```text
+me
+fr1
+fr2
+fr3
+fr4
+```
+
+新增：
+
+```sh
+sb add-friend fr4
+```
+
+删除：
+
+```sh
+sb delete-friend fr2
+```
+
+如果用菜单删除，会列出现有普通直连 Reality 用户，输入编号即可删除对应用户。
+
+添加后会输出新的 `vless://` 链接。删除朋友不会影响 `relay-` 开头的家宽 relay 节点。
+
 它会删除 home 落地机器上的 sing-box 服务、配置、healthcheck、info 文件和 `/usr/local/bin/sing-box`。它不会卸载系统依赖包，也不是完整恢复机器初始状态。
 
 恢复最近一次 home 卸载备份：

@@ -933,6 +933,8 @@ show_menu() {
   echo "5) Backup config/meta now"
   echo "6) Restore latest config/meta backup"
   echo "7) Update sing-box core only"
+  echo "8) Add a direct friend Reality user"
+  echo "9) Delete a direct friend Reality user"
   echo "0) Exit"
   echo
 }
@@ -1013,6 +1015,217 @@ for name, uuid, sid, link in links:
 PY
     chmod 600 "${CONFIG_PATH}" "${INFO_PATH}"
     apply_or_rollback "${backup}"
+    ;;
+
+  8|add-friend)
+    friend_name="${2:-}"
+    if [ -z "${friend_name}" ]; then
+      printf "Friend name to add: " > /dev/tty
+      read -r friend_name < /dev/tty
+    fi
+    case "${friend_name}" in
+      ""|relay-*|*[!A-Za-z0-9_-]*)
+        echo "Friend name can only contain letters, numbers, underscore and hyphen, and cannot start with relay-." >&2
+        exit 1
+        ;;
+    esac
+
+    uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || "${SINGBOX_BIN}" generate uuid)"
+    short_id="$(openssl rand -hex 4)"
+    backup="${CONFIG_PATH}.bak.add-friend.$(date +%Y%m%d%H%M%S)"
+    cp "${CONFIG_PATH}" "${backup}"
+    chmod 600 "${backup}"
+
+    export CONFIG_PATH FRIEND_ADD_NAME="${friend_name}" FRIEND_ADD_UUID="${uuid}" FRIEND_ADD_SHORT_ID="${short_id}"
+    python3 - <<'PY'
+import json
+import os
+
+path = os.environ["CONFIG_PATH"]
+name = os.environ["FRIEND_ADD_NAME"]
+uuid = os.environ["FRIEND_ADD_UUID"]
+short_id = os.environ["FRIEND_ADD_SHORT_ID"]
+
+with open(path, "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+reality = None
+for inbound in cfg.get("inbounds", []):
+    tls = inbound.get("tls", {})
+    if inbound.get("type") == "vless" and tls.get("reality", {}).get("enabled") is True:
+        reality = inbound
+        break
+if reality is None:
+    raise SystemExit("No Reality inbound found.")
+
+users = reality.setdefault("users", [])
+if any(u.get("name") == name for u in users):
+    raise SystemExit(f"Reality user already exists: {name}")
+if any(u.get("uuid") == uuid for u in users):
+    raise SystemExit(f"Reality UUID already exists: {uuid}")
+
+insert_index = len(users)
+for idx, user in enumerate(users):
+    if user.get("name", "").startswith("relay-"):
+        insert_index = idx
+        break
+
+users.insert(insert_index, {"name": name, "uuid": uuid, "flow": "xtls-rprx-vision"})
+
+reality_tls = reality.setdefault("tls", {}).setdefault("reality", {})
+short_ids = reality_tls.setdefault("short_id", [])
+if insert_index <= len(short_ids):
+    short_ids.insert(insert_index, short_id)
+else:
+    short_ids.append(short_id)
+
+route = cfg.setdefault("route", {})
+rules = route.setdefault("rules", [])
+direct_rule = None
+for rule in rules:
+    if rule.get("outbound") == "direct" and isinstance(rule.get("auth_user"), list):
+        direct_rule = rule
+        break
+if direct_rule is None:
+    direct_rule = {"auth_user": [], "action": "route", "outbound": "direct"}
+    rules.insert(0, direct_rule)
+if name not in direct_rule["auth_user"]:
+    direct_rule["auth_user"].append(name)
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
+    chmod 600 "${CONFIG_PATH}"
+    apply_or_rollback "${backup}"
+
+    link="vless://${uuid}@${ACCESS_HOST}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SERVER_NAME}&fp=chrome&pbk=${REALITY_PUBLIC_KEY}&sid=${short_id}&type=tcp&headerType=none#${NODE_PREFIX}-${friend_name}"
+    umask 077
+    cat >> "${INFO_PATH}" <<EOFINFO
+
+Direct friend added: ${friend_name}
+-------------------------------
+uuid: ${uuid}
+short_id: ${short_id}
+link:
+${link}
+EOFINFO
+    chmod 600 "${INFO_PATH}"
+
+    echo
+    echo "Direct friend Reality user added: ${friend_name}"
+    echo "Backup: ${backup}"
+    echo "Info appended to: ${INFO_PATH}"
+    echo
+    echo "Import link:"
+    echo "${link}"
+    ;;
+
+  9|delete-friend|del-friend|remove-friend)
+    friend_name="${2:-}"
+    if [ -z "${friend_name}" ]; then
+      friend_list="$(python3 - <<'PY'
+import json
+with open('/etc/sing-box/config.json', 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+names = []
+for inbound in cfg.get('inbounds', []):
+    tls = inbound.get('tls', {})
+    if inbound.get('type') == 'vless' and tls.get('reality', {}).get('enabled') is True:
+        for user in inbound.get('users', []):
+            name = user.get('name', '')
+            if name and not name.startswith('relay-'):
+                names.append(name)
+        break
+for name in names:
+    print(name)
+PY
+)"
+      if [ -z "${friend_list}" ]; then
+        echo "No direct Reality users found."
+        exit 0
+      fi
+      echo "Direct Reality users:" > /dev/tty
+      i=1
+      for name in ${friend_list}; do
+        echo "  ${i}) ${name}" > /dev/tty
+        i=$((i + 1))
+      done
+      printf "Choose user number to delete: " > /dev/tty
+      read -r delete_index < /dev/tty
+      friend_name="$(printf '%s\n' ${friend_list} | sed -n "${delete_index}p")"
+      if [ -z "${friend_name}" ]; then
+        echo "Invalid choice." >&2
+        exit 1
+      fi
+    fi
+    case "${friend_name}" in
+      ""|relay-*|*[!A-Za-z0-9_-]*)
+        echo "Friend name can only contain letters, numbers, underscore and hyphen, and cannot start with relay-." >&2
+        exit 1
+        ;;
+    esac
+
+    backup="${CONFIG_PATH}.bak.delete-friend.$(date +%Y%m%d%H%M%S)"
+    cp "${CONFIG_PATH}" "${backup}"
+    chmod 600 "${backup}"
+
+    export CONFIG_PATH FRIEND_DELETE_NAME="${friend_name}"
+    python3 - <<'PY'
+import json
+import os
+
+path = os.environ["CONFIG_PATH"]
+name = os.environ["FRIEND_DELETE_NAME"]
+
+with open(path, "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+reality = None
+for inbound in cfg.get("inbounds", []):
+    tls = inbound.get("tls", {})
+    if inbound.get("type") == "vless" and tls.get("reality", {}).get("enabled") is True:
+        reality = inbound
+        break
+if reality is None:
+    raise SystemExit("No Reality inbound found.")
+
+users = reality.setdefault("users", [])
+base_users = [u for u in users if not u.get("name", "").startswith("relay-")]
+if name not in [u.get("name") for u in base_users]:
+    raise SystemExit(f"Direct Reality user not found: {name}")
+if len(base_users) <= 1:
+    raise SystemExit("Refusing to delete the last direct Reality user.")
+
+remove_indexes = {idx for idx, user in enumerate(users) if user.get("name") == name and not user.get("name", "").startswith("relay-")}
+reality["users"] = [user for idx, user in enumerate(users) if idx not in remove_indexes]
+
+reality_tls = reality.setdefault("tls", {}).setdefault("reality", {})
+short_ids = reality_tls.setdefault("short_id", [])
+if short_ids:
+    reality_tls["short_id"] = [sid for idx, sid in enumerate(short_ids) if idx not in remove_indexes]
+
+route = cfg.setdefault("route", {})
+new_rules = []
+for rule in route.get("rules", []):
+    auth_users = rule.get("auth_user")
+    if isinstance(auth_users, list):
+        rule["auth_user"] = [user for user in auth_users if user != name]
+        if not rule["auth_user"]:
+            continue
+    new_rules.append(rule)
+route["rules"] = new_rules
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+
+print(f"Deleted direct Reality user: {name}")
+PY
+    chmod 600 "${CONFIG_PATH}"
+    apply_or_rollback "${backup}"
+    echo "Direct friend Reality user deleted: ${friend_name}"
+    echo "Backup: ${backup}"
     ;;
 
   2|list-relay)
