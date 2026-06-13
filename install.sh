@@ -129,11 +129,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=root
+WorkingDirectory=${CONFIG_DIR}
+ExecStartPre=${SINGBOX_BIN} check -c ${CONFIG_PATH}
 ExecStart=${SINGBOX_BIN} run -c ${CONFIG_PATH}
 ExecReload=/bin/kill -HUP \$MAINPID
-Restart=always
+Restart=on-failure
 RestartSec=3
-LimitNOFILE=infinity
+LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target

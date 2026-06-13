@@ -304,6 +304,35 @@ sb purge
 
 ## 日常维护和检查
 
+### 服务性能设置
+
+Debian/Ubuntu 机器会写入 `/etc/systemd/system/sing-box.service`，核心设置是：
+
+```ini
+User=root
+WorkingDirectory=/etc/sing-box
+ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+```
+
+说明：
+
+- `ExecStartPre`：启动前先检查配置，手改配置出错时不会带病启动。
+- `Restart=on-failure` / `RestartSec=3`：异常退出后 3 秒自动拉起；手动停止服务时不会反复复活。
+- `LimitNOFILE=1048576`：提高文件描述符上限，适合 DMIT 2G 带宽这种入口机。
+- 不设置 `OOMScoreAdjust=-1000`：1G 内存机器更稳妥，避免系统内存紧张时 SSH 或其它系统进程更容易先被杀。
+
+这套 service 会用于 DMIT/HK 入口机，也会用于 Debian/Ubuntu 家宽机。Alpine 家宽机使用 OpenRC，并开启 `respawn` 自动拉起。
+
+你的机器规格下建议：
+
+- DMIT：2G 带宽、1C1G，适合作主力入口，保留这套高连接上限配置。
+- HK：10Mbps、1C1G，不限流量，瓶颈是带宽，不是 CPU，保留同样配置也没问题。
+- 家宽/LXC：重点是端口映射稳定和服务自动拉起，OpenRC/systemd 都已配置自动重启。
+
 ### 通用命令
 
 DMIT、HK、家宽机器都可以先用 `sb test` 做一次总检查。这个命令适合在这些情况使用：
