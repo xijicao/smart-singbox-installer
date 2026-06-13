@@ -264,7 +264,14 @@ entry_config() {
     }
   }],
   "outbounds": [
-    { "type": "direct", "tag": "direct", "domain_strategy": "prefer_ipv4" },
+    {
+      "type": "direct",
+      "tag": "direct",
+      "domain_resolver": {
+        "server": "dns_local",
+        "strategy": "prefer_ipv4"
+      }
+    },
     { "type": "block", "tag": "block" }
   ],
   "route": {
@@ -495,7 +502,11 @@ def add_ss(link):
         "server_port": ss["server_port"],
         "method": ss["method"],
         "password": ss["password"],
-        "network": "tcp"
+        "network": "tcp",
+        "domain_resolver": {
+            "server": "dns_local",
+            "strategy": "prefer_ipv4"
+        }
     })
     cfg.setdefault("route", {}).setdefault("rules", []).insert(0, {
         "auth_user": [user_name],
@@ -806,7 +817,14 @@ EOF
   cat >> "$CONFIG_PATH" <<EOF
   ],
   "outbounds": [
-    { "type": "direct", "tag": "direct", "domain_strategy": "prefer_ipv4" },
+    {
+      "type": "direct",
+      "tag": "direct",
+      "domain_resolver": {
+        "server": "dns_local",
+        "strategy": "prefer_ipv4"
+      }
+    },
     { "type": "block", "tag": "block" }
   ],
   "route": {

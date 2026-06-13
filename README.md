@@ -72,6 +72,12 @@ ssh -p 51398 root@你的服务器IP
 
 ## 一键安装
 
+如果新机器提示 `curl: command not found`，先安装 curl：
+
+```sh
+apt-get update && apt-get install -y curl ca-certificates
+```
+
 上传到 GitHub 后使用：
 
 ```sh
