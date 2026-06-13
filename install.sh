@@ -181,12 +181,12 @@ check_config() {
 enable_entry_firewall() {
   [ "$OS_FAMILY" = "debian" ] || return 0
 
-  ssh_port="$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $4}')"
-  if [ "${FORCE_ENTRY_FIREWALL:-0}" != "1" ] && [ "$ssh_port" != "51398" ]; then
+  current_ssh_port="$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $4}')"
+  if [ "${FORCE_ENTRY_FIREWALL:-0}" != "1" ] && [ "$current_ssh_port" != "$SSH_PORT" ]; then
     log ""
-    log "WARNING: DMIT/HK firewall will allow inbound TCP 443 and TCP 51398 only."
-    log "Current SSH server port looks like: ${ssh_port:-unknown}."
-    log "Please move SSH to TCP 51398 before enabling this firewall."
+    log "WARNING: DMIT/HK firewall will allow inbound TCP 443 and TCP ${SSH_PORT} only."
+    log "Current SSH server port looks like: ${current_ssh_port:-unknown}."
+    log "Please move SSH to TCP ${SSH_PORT} before enabling this firewall."
     printf "Type ENTRYFW to continue anyway: " > /dev/tty
     read -r confirm < /dev/tty
     [ "$confirm" = "ENTRYFW" ] || die "Cancelled firewall setup."
@@ -194,14 +194,14 @@ enable_entry_firewall() {
     log ""
     log "WARNING: This will enable the entry firewall."
     log "Inbound TCP 443 is for sing-box Reality."
-    log "Inbound TCP 51398 is for SSH."
+    log "Inbound TCP ${SSH_PORT} is for SSH."
     log "Make sure you have provider console/rescue access before continuing."
     printf "Type ENTRYFW to continue: " > /dev/tty
     read -r confirm < /dev/tty
     [ "$confirm" = "ENTRYFW" ] || die "Cancelled firewall setup."
   fi
 
-  cat > /etc/nftables.conf <<'EOF'
+  cat > /etc/nftables.conf <<EOF
 flush ruleset
 
 table inet filter {
@@ -213,7 +213,7 @@ table inet filter {
     iif lo accept
     ip protocol icmp accept
     ip6 nexthdr ipv6-icmp accept
-    tcp dport 51398 accept
+    tcp dport ${SSH_PORT} accept
     tcp dport 443 accept
   }
 
@@ -588,7 +588,7 @@ def uninstall_entry():
     subprocess.call(["rm", "-f", "/usr/local/bin/sb"])
     subprocess.call(["rm", "-f", "/root/singbox-entry-info.txt"])
     print(f"Entry install removed. Backup: {archive}")
-    print("nftables config is backed up but not disabled, so SSH 51398 remains protected.")
+    print("nftables config is backed up but not disabled, so your SSH allow rule remains protected.")
 
 def purge_entry():
     confirm = input("Type PURGE_ENTRY to remove entry install WITHOUT backup: ").strip()
@@ -714,6 +714,8 @@ install_entry() {
 
   ACCESS_HOST="$(ask "Public IP/domain for Reality links" "$(public_ip)")"
   REALITY_SNI="$(ask "Reality SNI" "$REALITY_SNI")"
+  SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
+  validate_port "SSH port" "$SSH_PORT"
   ME_UUID="$(random_uuid)"
   ME_SID="$(random_hex8)"
   reality_keypair
@@ -733,7 +735,7 @@ install_entry() {
   log "Info: $INFO_ENTRY"
   log "Manager: sb"
   log "Add SS landing: sb add-ss 'ss://...'"
-  log "Firewall: inbound TCP 443 and TCP 51398 only."
+  log "Firewall: inbound TCP 443 and TCP ${SSH_PORT} only."
 }
 
 ss_uri() {

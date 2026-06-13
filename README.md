@@ -8,10 +8,10 @@ DMIT 和 HK 入口机会启用防火墙，只放行：
 
 ```text
 TCP 443    sing-box Reality
-TCP 51398  SSH
+TCP 你的 SSH 高位端口
 ```
 
-所以在 DMIT/HK 上运行安装脚本前，先把 Debian/Ubuntu 的 SSH 端口改成 `51398`。
+所以在 DMIT/HK 上运行安装脚本前，先把 Debian/Ubuntu 的 SSH 端口改成一个你自己选的高位端口，例如 `51398`、`38471`、`45678`。不要把你的真实端口写到公开仓库里。
 
 编辑 SSH 配置：
 
@@ -25,7 +25,7 @@ nano /etc/ssh/sshd_config
 #Port 22
 ```
 
-改成：
+改成你自己选的高位端口，例如：
 
 ```text
 Port 51398
@@ -57,7 +57,13 @@ systemctl restart sshd
 ssh -p 51398 root@你的服务器IP
 ```
 
-确认 `51398` 可以登录后，再运行本安装脚本。这个步骤很重要，否则防火墙启用后可能进不去机器。
+把上面的 `51398` 换成你实际设置的 SSH 端口。确认新端口可以登录后，再运行本安装脚本。安装 DMIT/HK 时脚本会询问：
+
+```text
+SSH port to allow in firewall
+```
+
+这里必须填写你实际设置的 SSH 端口。这个步骤很重要，否则防火墙启用后可能进不去机器。
 
 设计目标：
 
@@ -66,7 +72,7 @@ ssh -p 51398 root@你的服务器IP
 - 在 DMIT/HK 上粘贴家宽的 `ss://`，自动生成一个新的 Reality 中转链接。
 - 后续可以添加朋友直连用户，也可以删除朋友或某个家宽落地。
 - sing-box 使用 systemd/OpenRC 托管，机器重启后自动拉起。
-- DMIT/HK 的 nftables 防火墙只放行入站 TCP `443` 和 `51398`。
+- DMIT/HK 的 nftables 防火墙只放行入站 TCP `443` 和你安装时填写的 SSH 端口。
 - 家宽 SS2022 不要求使用 `443`，公网映射端口可以是面板给你的任意 TCP 端口。
 - DMIT/HK 的 direct 出站已设置为 `prefer_ipv4`。DMIT 双栈时会优先 IPv4 出站；HK 如果本来只有 IPv4，不需要额外处理。
 
@@ -501,7 +507,7 @@ DMIT/HK 会写入 nftables，只允许：
 
 ```text
 入站 TCP 443
-入站 TCP 51398
+入站 TCP 你填写的 SSH 端口
 已建立连接
 loopback
 ICMP / IPv6 ICMP
@@ -548,7 +554,7 @@ FORCE_ENTRY_FIREWALL=1 sh install.sh
 - 朋友用户添加/删除
 - 重启自拉起
 - 配置检查失败自动回滚
-- 443 + 51398 入口防火墙
+- 443 + 自定义 SSH 端口入口防火墙
 
 舍弃：
 
