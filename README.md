@@ -84,7 +84,7 @@ Alpine：
 
 ```sh
 apk update
-apk add --no-cache curl ca-certificates
+apk add --no-cache curl ca-certificates iproute2 netcat-openbsd
 ```
 
 上传到 GitHub 后使用：
@@ -183,6 +183,7 @@ Reality public mapped port
 - Reality only：优先用 `443`
 - SS2022 + Reality 同时安装：建议 SS2022 用 `443`，Reality 用 `8443`
 - NAT/LXC 面板机器：内部端口填容器里监听的端口，公网端口填面板映射给你的端口
+- 家宽 Reality 配置使用最小兼容模板，不启用 `tcp_fast_open`，也不限制 `max_time_difference`，尽量贴近已验证可用的一键脚本配置。
 
 举例：
 
@@ -245,6 +246,7 @@ sb add-friend fr1
 sb del-user fr1
 sb restart
 sb uninstall
+sb purge
 ```
 
 说明：
@@ -257,6 +259,7 @@ sb uninstall
 - `backup` 会把当前配置备份到 `/etc/sing-box/backups`。
 - `restore-latest` 会恢复最新配置备份，恢复前会先备份当前状态。
 - `uninstall` 会先打包备份到 `/root/singbox-entry-uninstall-backup-*.tar.gz`，再停止 sing-box 并删除入口配置和 `sb` 管理器。
+- `purge` 是无备份强制清理，会停止 sing-box、删除 `/etc/sing-box`、删除 `sb` 和信息文件。DMIT/HK 不会自动关闭 nftables，避免意外暴露 SSH。
 
 如果想交互式删除落地，直接运行：
 
@@ -278,6 +281,7 @@ sb status
 sb restart
 sb reset-ss
 sb uninstall
+sb purge
 ```
 
 说明：
@@ -288,6 +292,15 @@ sb uninstall
 - `reset-ss` 会重新生成 SS2022 密码，更新 `/etc/sing-box/config.json`，重启服务，并刷新 `/root/singbox-home-info.txt`。
 - Reality only 模式没有 SS2022，不能使用 `reset-ss`。
 - `uninstall` 会先打包备份到 `/root/singbox-home-uninstall-backup-*.tar.gz`，再删除家宽落地安装。
+- `purge` 是无备份强制清理，会停止 sing-box，删除 `/etc/sing-box`、`/root/singbox-home-info.txt` 和 `sb`。
+
+如果 `sb` 已经坏了或不存在，也可以重新运行安装脚本，选择：
+
+```text
+5. Purge current install without backup
+```
+
+这个选项不依赖旧的 `sb`，适合反复测试时清空环境后重装。
 
 ## 日常维护和检查
 
@@ -448,8 +461,10 @@ apt-get update && apt-get install -y netcat-openbsd
 Alpine 可以安装：
 
 ```sh
-apk add --no-cache netcat-openbsd
+apk add --no-cache iproute2 netcat-openbsd
 ```
+
+`iproute2` 提供 `ss` 命令，`netcat-openbsd` 提供 `nc` 命令。
 
 ## 防火墙提醒
 

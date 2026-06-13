@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+﻿#!/usr/bin/env sh
 set -eu
 
 CONFIG_DIR="/etc/sing-box"
@@ -51,7 +51,7 @@ install_deps() {
       ;;
     alpine)
       apk update
-      apk add --no-cache bash curl ca-certificates openssl python3 openrc
+      apk add --no-cache bash curl ca-certificates openssl python3 openrc iproute2 netcat-openbsd
       ;;
   esac
 }
@@ -245,7 +245,6 @@ entry_config() {
     "tag": "reality-in",
     "listen": "::",
     "listen_port": 443,
-    "tcp_fast_open": true,
     "users": [{
       "name": "me",
       "uuid": "$ME_UUID",
@@ -258,8 +257,7 @@ entry_config() {
         "enabled": true,
         "handshake": { "server": "$REALITY_SNI", "server_port": 443 },
         "private_key": "$REALITY_PRIVATE_KEY",
-        "short_id": ["$ME_SID"],
-        "max_time_difference": "1m"
+        "short_id": ["$ME_SID"]
       }
     }
   }],
@@ -589,6 +587,22 @@ def uninstall_entry():
     print(f"Entry install removed. Backup: {archive}")
     print("nftables config is backed up but not disabled, so SSH 51398 remains protected.")
 
+def purge_entry():
+    confirm = input("Type PURGE_ENTRY to remove entry install WITHOUT backup: ").strip()
+    if confirm != "PURGE_ENTRY":
+        print("Cancelled.")
+        return
+    if shutil.which("systemctl"):
+        subprocess.call(["systemctl", "stop", "sing-box"])
+        subprocess.call(["systemctl", "disable", "sing-box"])
+        Path("/etc/systemd/system/sing-box.service").unlink(missing_ok=True)
+        subprocess.call(["systemctl", "daemon-reload"])
+    shutil.rmtree("/etc/sing-box", ignore_errors=True)
+    subprocess.call(["rm", "-f", "/usr/local/bin/sb"])
+    subprocess.call(["rm", "-f", "/root/singbox-entry-info.txt"])
+    print("Entry install purged without backup.")
+    print("nftables was not disabled. If needed, edit /etc/nftables.conf manually or run: systemctl disable --now nftables")
+
 def menu():
     while True:
         print()
@@ -604,6 +618,7 @@ def menu():
         print("9. Backup config")
         print("10. Restore latest backup")
         print("11. Uninstall entry")
+        print("12. Purge entry without backup")
         print("0. Exit")
         choice = input("Choose: ").strip()
         if choice == "1":
@@ -631,6 +646,8 @@ def menu():
             restore_latest()
         elif choice == "11":
             uninstall_entry()
+        elif choice == "12":
+            purge_entry()
         elif choice == "0":
             return
 
@@ -661,8 +678,10 @@ def main():
         restore_latest()
     elif cmd == "uninstall":
         uninstall_entry()
+    elif cmd == "purge":
+        purge_entry()
     else:
-        print("Usage: sb [add-ss|del-relay|list-relays|links|add-friend|del-user|restart|test|backup|restore-latest|uninstall]")
+        print("Usage: sb [add-ss|del-relay|list-relays|links|add-friend|del-user|restart|test|backup|restore-latest|uninstall|purge]")
         raise SystemExit(1)
 
 if __name__ == "__main__":
@@ -793,9 +812,7 @@ EOF
       "tag": "reality-in",
       "listen": "::",
       "listen_port": ${REALITY_PORT},
-      "tcp_fast_open": true,
       "users": [{
-        "name": "${HOME_NAME}-direct",
         "uuid": "${REALITY_UUID}",
         "flow": "xtls-rprx-vision"
       }],
@@ -806,8 +823,7 @@ EOF
           "enabled": true,
           "handshake": { "server": "${REALITY_SNI}", "server_port": 443 },
           "private_key": "${REALITY_PRIVATE_KEY}",
-          "short_id": ["${REALITY_SID}"],
-          "max_time_difference": "1m"
+          "short_id": ["${REALITY_SID}"]
         }
       }
     }
@@ -1017,6 +1033,26 @@ uninstall_home() {
   echo "Home install removed. Backup: $backup"
 }
 
+purge_home() {
+  printf "Type PURGE_HOME to remove home install WITHOUT backup: "
+  read -r confirm
+  [ "$confirm" = "PURGE_HOME" ] || { echo "Cancelled."; exit 0; }
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop sing-box 2>/dev/null || true
+    systemctl disable sing-box 2>/dev/null || true
+    rm -f /etc/systemd/system/sing-box.service
+    systemctl daemon-reload 2>/dev/null || true
+  else
+    rc-service sing-box stop 2>/dev/null || true
+    rc-update del sing-box default 2>/dev/null || true
+    rm -f /etc/init.d/sing-box
+  fi
+  rm -rf /etc/sing-box
+  rm -f /root/singbox-home-info.txt
+  rm -f /usr/local/bin/sb
+  echo "Home install purged without backup."
+}
+
 case "${1:-menu}" in
   info)
     write_info
@@ -1040,6 +1076,9 @@ case "${1:-menu}" in
   uninstall)
     uninstall_home
     ;;
+  purge)
+    purge_home
+    ;;
   menu|*)
     echo "Home sing-box manager"
     echo "1. Show SS link"
@@ -1048,6 +1087,7 @@ case "${1:-menu}" in
     echo "4. Test"
     echo "5. Reset SS password"
     echo "6. Uninstall home install"
+    echo "7. Purge home install without backup"
     echo "0. Exit"
     printf "Choose: "
     read -r c
@@ -1058,6 +1098,7 @@ case "${1:-menu}" in
       4) "$0" test ;;
       5) "$0" reset-ss ;;
       6) "$0" uninstall ;;
+      7) "$0" purge ;;
       0) exit 0 ;;
     esac
     ;;
@@ -1161,13 +1202,42 @@ EOF
   log "Manager: sb"
 }
 
+purge_current_install() {
+  log ""
+  log "This will remove current sing-box install WITHOUT backup."
+  log "It removes service files, /etc/sing-box, /usr/local/bin/sb and info files."
+  log "For DMIT/HK, nftables is NOT disabled automatically to avoid exposing SSH unexpectedly."
+  printf "Type PURGE to continue: " > /dev/tty
+  read -r confirm < /dev/tty
+  [ "$confirm" = "PURGE" ] || die "Cancelled."
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop sing-box 2>/dev/null || true
+    systemctl disable sing-box 2>/dev/null || true
+    rm -f /etc/systemd/system/sing-box.service
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+
+  if command -v rc-service >/dev/null 2>&1; then
+    rc-service sing-box stop 2>/dev/null || true
+    rc-update del sing-box default 2>/dev/null || true
+    rm -f /etc/init.d/sing-box
+  fi
+
+  rm -rf /etc/sing-box
+  rm -f /usr/local/bin/sb
+  rm -f /root/singbox-entry-info.txt /root/singbox-home-info.txt
+  log "Purged current sing-box install without backup."
+}
+
 print_menu() {
   log ""
   log "Smart sing-box simplified installer"
-  log "1. DMIT Debian entry / DMIT 主力入口"
-  log "2. HK Debian entry / HK 国际互连入口"
-  log "3. Home landing / 家宽 SS 落地"
-  log "4. Add ss:// to this entry / 给当前入口添加落地"
+  log "1. DMIT Debian entry"
+  log "2. HK Debian entry"
+  log "3. Home landing/direct"
+  log "4. Add ss:// to this entry"
+  log "5. Purge current install without backup"
   log "0. Exit"
   log ""
 }
@@ -1187,6 +1257,7 @@ main() {
       link="$(ask "Paste ss:// link" "")"
       /usr/local/bin/sb add-ss "$link"
       ;;
+    5) purge_current_install ;;
     0) exit 0 ;;
     *) die "Invalid choice: $choice" ;;
   esac
