@@ -74,8 +74,17 @@ ssh -p 51398 root@你的服务器IP
 
 如果新机器提示 `curl: command not found`，先安装 curl：
 
+Debian/Ubuntu：
+
 ```sh
 apt-get update && apt-get install -y curl ca-certificates
+```
+
+Alpine：
+
+```sh
+apk update
+apk add --no-cache curl ca-certificates
 ```
 
 上传到 GitHub 后使用：
@@ -188,7 +197,15 @@ Reality internal listen port: 8443
 Reality public mapped port: 24497
 ```
 
-Reality 的 SNI 默认建议日本家宽用 `www.sony.jp`。如果你知道某个地区更合适的握手域名，也可以安装时手动输入。
+Reality 的 SNI 默认是日本方向的 `www.sony.jp`。安装时会问 `Reality SNI`，可以按家宽地区手动填：
+
+```text
+JP / 日本：www.sony.jp
+HK / 香港：www.hkex.com.hk
+TW / 台湾：www.cht.com.tw
+```
+
+如果你知道某个地区更合适的握手域名，也可以安装时手动输入。这里填的是伪装握手域名，不是你的服务器域名。
 
 ## DMIT/HK 添加家宽落地
 
