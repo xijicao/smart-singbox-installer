@@ -178,6 +178,93 @@ check_config() {
   sing-box check -c "$CONFIG_PATH"
 }
 
+default_netdev() {
+  ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}'
+}
+
+install_stable_net_profile() {
+  [ "$OS_FAMILY" = "debian" ] || die "Stable network profile currently supports Debian/Ubuntu with systemd."
+  command -v systemctl >/dev/null 2>&1 || die "Stable network profile requires systemd."
+
+  dev="${1:-}"
+  [ -n "$dev" ] || dev="$(default_netdev)"
+  [ -n "$dev" ] || die "Cannot detect default network interface. Pass interface name manually."
+
+  if ! command -v tc >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y iproute2
+  fi
+  tc_bin="$(command -v tc)"
+  [ -n "$tc_bin" ] || die "tc command not found after installing iproute2."
+
+  cat > /etc/sysctl.d/99-dmit-stable.conf <<'EOF'
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_limit_output_bytes=524288
+EOF
+  sysctl --system
+
+  cat > /etc/systemd/system/tc-htb-fq.service <<EOF
+[Unit]
+Description=HTB 800M limit with fq for ${dev}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${tc_bin} qdisc replace dev ${dev} root handle 1: htb default 10
+ExecStart=${tc_bin} class replace dev ${dev} parent 1: classid 1:10 htb rate 800mbit ceil 800mbit
+ExecStart=${tc_bin} qdisc replace dev ${dev} parent 1:10 handle 10: fq
+ExecStop=${tc_bin} qdisc del dev ${dev} root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now tc-htb-fq.service
+  log "Stable network profile installed on ${dev} with 800mbit HTB + fq."
+  stable_net_status "$dev"
+}
+
+remove_stable_net_profile() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now tc-htb-fq.service 2>/dev/null || true
+  fi
+  rm -f /etc/systemd/system/tc-htb-fq.service
+  rm -f /etc/sysctl.d/99-dmit-stable.conf
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+  sysctl --system || true
+  log "Stable network profile removed."
+  log "If temporary tuning was applied manually before, reboot to return every runtime value to OS defaults."
+}
+
+stable_net_status() {
+  dev="${1:-}"
+  [ -n "$dev" ] || dev="$(default_netdev)"
+  [ -n "$dev" ] || dev="eth0"
+
+  log "== sysctl =="
+  sysctl net.core.default_qdisc || true
+  sysctl net.ipv4.tcp_congestion_control || true
+  sysctl net.ipv4.tcp_mtu_probing || true
+  sysctl net.ipv4.tcp_limit_output_bytes || true
+  log ""
+  log "== tc qdisc (${dev}) =="
+  tc -s qdisc show dev "$dev" || true
+  log ""
+  log "== tc class (${dev}) =="
+  tc -s class show dev "$dev" || true
+  log ""
+  log "== service =="
+  systemctl --no-pager --full status tc-htb-fq.service || true
+}
+
 enable_entry_firewall() {
   [ "$OS_FAMILY" = "debian" ] || return 0
 
@@ -560,6 +647,90 @@ def status_test():
     elif shutil.which("netstat"):
         subprocess.call(["netstat", "-lntp"])
 
+def default_netdev():
+    try:
+        out = subprocess.check_output(["ip", "route", "get", "1.1.1.1"], text=True, stderr=subprocess.DEVNULL)
+        parts = out.split()
+        if "dev" in parts:
+            return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+    return "eth0"
+
+def install_stable_net_profile(dev=None):
+    if not shutil.which("systemctl"):
+        raise SystemExit("Stable network profile requires systemd.")
+    dev = dev or default_netdev()
+    tc_bin = shutil.which("tc")
+    if not tc_bin:
+        subprocess.check_call(["apt-get", "update"])
+        subprocess.check_call(["apt-get", "install", "-y", "iproute2"])
+        tc_bin = shutil.which("tc")
+    if not tc_bin:
+        raise SystemExit("tc command not found after installing iproute2.")
+
+    Path("/etc/sysctl.d/99-dmit-stable.conf").write_text(
+        "net.core.default_qdisc=fq\n"
+        "net.ipv4.tcp_congestion_control=bbr\n"
+        "net.ipv4.tcp_mtu_probing=1\n"
+        "net.ipv4.tcp_limit_output_bytes=524288\n",
+        encoding="utf-8",
+    )
+    subprocess.call(["sysctl", "--system"])
+
+    Path("/etc/systemd/system/tc-htb-fq.service").write_text(f"""[Unit]
+Description=HTB 800M limit with fq for {dev}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={tc_bin} qdisc replace dev {dev} root handle 1: htb default 10
+ExecStart={tc_bin} class replace dev {dev} parent 1: classid 1:10 htb rate 800mbit ceil 800mbit
+ExecStart={tc_bin} qdisc replace dev {dev} parent 1:10 handle 10: fq
+ExecStop={tc_bin} qdisc del dev {dev} root
+
+[Install]
+WantedBy=multi-user.target
+""", encoding="utf-8")
+
+    subprocess.call(["systemctl", "daemon-reload"])
+    subprocess.call(["systemctl", "enable", "--now", "tc-htb-fq.service"])
+    print(f"Stable network profile installed on {dev} with 800mbit HTB + fq.")
+    stable_net_status(dev)
+
+def remove_stable_net_profile():
+    if shutil.which("systemctl"):
+        subprocess.call(["systemctl", "disable", "--now", "tc-htb-fq.service"], stderr=subprocess.DEVNULL)
+    Path("/etc/systemd/system/tc-htb-fq.service").unlink(missing_ok=True)
+    Path("/etc/sysctl.d/99-dmit-stable.conf").unlink(missing_ok=True)
+    if shutil.which("systemctl"):
+        subprocess.call(["systemctl", "daemon-reload"])
+    subprocess.call(["sysctl", "--system"])
+    print("Stable network profile removed.")
+    print("If temporary tuning was applied manually before, reboot to return every runtime value to OS defaults.")
+
+def stable_net_status(dev=None):
+    dev = dev or default_netdev()
+    print("== sysctl ==")
+    subprocess.call(["sysctl", "net.core.default_qdisc"])
+    subprocess.call(["sysctl", "net.ipv4.tcp_congestion_control"])
+    subprocess.call(["sysctl", "net.ipv4.tcp_mtu_probing"])
+    subprocess.call(["sysctl", "net.ipv4.tcp_limit_output_bytes"])
+    print(f"\n== tc qdisc ({dev}) ==")
+    if shutil.which("tc"):
+        subprocess.call(["tc", "-s", "qdisc", "show", "dev", dev])
+        print(f"\n== tc class ({dev}) ==")
+        subprocess.call(["tc", "-s", "class", "show", "dev", dev])
+    else:
+        print("tc command not found.")
+    print("\n== service ==")
+    if shutil.which("systemctl"):
+        subprocess.call(["systemctl", "--no-pager", "--full", "status", "tc-htb-fq.service"])
+    else:
+        print("systemctl not found.")
+
 def uninstall_entry():
     confirm = input("Type UNINSTALL_ENTRY to remove entry install: ").strip()
     if confirm != "UNINSTALL_ENTRY":
@@ -622,6 +793,9 @@ def menu():
         print("10. Restore latest backup")
         print("11. Uninstall entry")
         print("12. Purge entry without backup")
+        print("13. Install stable network profile")
+        print("14. Remove stable network profile")
+        print("15. Show stable network profile status")
         print("0. Exit")
         choice = input("Choose: ").strip()
         if choice == "1":
@@ -651,6 +825,12 @@ def menu():
             uninstall_entry()
         elif choice == "12":
             purge_entry()
+        elif choice == "13":
+            install_stable_net_profile()
+        elif choice == "14":
+            remove_stable_net_profile()
+        elif choice == "15":
+            stable_net_status()
         elif choice == "0":
             return
 
@@ -683,8 +863,14 @@ def main():
         uninstall_entry()
     elif cmd == "purge":
         purge_entry()
+    elif cmd == "stable-install":
+        install_stable_net_profile(args[1] if len(args) > 1 else None)
+    elif cmd == "stable-remove":
+        remove_stable_net_profile()
+    elif cmd == "stable-status":
+        stable_net_status(args[1] if len(args) > 1 else None)
     else:
-        print("Usage: sb [add-ss|del-relay|list-relays|links|add-friend|del-user|restart|test|backup|restore-latest|uninstall|purge]")
+        print("Usage: sb [add-ss|del-relay|list-relays|links|add-friend|del-user|restart|test|backup|restore-latest|uninstall|purge|stable-install|stable-remove|stable-status]")
         raise SystemExit(1)
 
 if __name__ == "__main__":
@@ -1243,6 +1429,9 @@ print_menu() {
   log "3. Home landing/direct"
   log "4. Add ss:// to this entry"
   log "5. Purge current install without backup"
+  log "6. Install stable network profile only"
+  log "7. Remove stable network profile only"
+  log "8. Show stable network profile status"
   log "0. Exit"
   log ""
 }
@@ -1263,6 +1452,9 @@ main() {
       /usr/local/bin/sb add-ss "$link"
       ;;
     5) purge_current_install ;;
+    6) install_stable_net_profile ;;
+    7) remove_stable_net_profile ;;
+    8) stable_net_status ;;
     0) exit 0 ;;
     *) die "Invalid choice: $choice" ;;
   esac

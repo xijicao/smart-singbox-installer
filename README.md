@@ -253,6 +253,9 @@ sb del-relay relay-xxx
 sb add-friend fr1
 sb del-user fr1
 sb restart
+sb stable-install
+sb stable-remove
+sb stable-status
 sb uninstall
 sb purge
 ```
@@ -264,6 +267,9 @@ sb purge
 - `del-relay`：删除某个 `relay-*` 落地节点。
 - `links`：显示所有 Reality 链接。
 - `test`：检查版本、配置、服务状态、监听端口。
+- `stable-install`：安装 DMIT EB CORONA 稳定网络优化 profile。
+- `stable-remove`：卸载稳定网络优化 profile。
+- `stable-status`：查看稳定网络优化 profile 状态。
 - `backup`：备份当前配置到 `/etc/sing-box/backups`。
 - `restore-latest`：恢复最新备份。
 - `uninstall`：带备份卸载。
@@ -449,3 +455,142 @@ singbox-*.txt
 ```
 
 它们可能包含 UUID、Reality 私钥、SS 密码、节点链接。
+
+## DMIT EB CORONA 长期稳定网络优化
+
+这一节用于 DMIT EB CORONA 这类晚高峰容易出现 YouTube QUIC 中断、Telegram 下载瞬时卡顿、TCP 快速重传偏高的机器。
+
+目标不是跑满 2G 口，而是做成长期不用维护的稳定版本：
+
+- 服务端使用 `BBR + fq`。
+- 开启 `tcp_mtu_probing=1`，缓解路径 MTU/PMTUD 黑洞问题。
+- 设置 `tcp_limit_output_bytes=524288`，减少 TCP 突发和本机队列堆积。
+- 使用 `HTB + fq` 将服务端出口稳定限制在 `800mbit`。
+- 浏览器端建议禁用 QUIC，YouTube 走 TCP 后稳定性通常更好。
+
+### 推荐固定参数
+
+写入 `/etc/sysctl.d/99-dmit-stable.conf`：
+
+```conf
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_limit_output_bytes=524288
+```
+
+应用：
+
+```sh
+sysctl --system
+```
+
+### 推荐限速方式
+
+不要只用 `tbf` 替换根队列。推荐使用 `HTB` 控制总出口，再在下面挂 `fq` 保留 BBR pacing：
+
+```sh
+tc qdisc replace dev eth0 root handle 1: htb default 10
+tc class replace dev eth0 parent 1: classid 1:10 htb rate 800mbit ceil 800mbit
+tc qdisc replace dev eth0 parent 1:10 handle 10: fq
+```
+
+如果网卡不是 `eth0`，请先查看默认出口网卡：
+
+```sh
+ip route get 1.1.1.1
+```
+
+然后把命令里的 `eth0` 换成实际网卡名，例如 `ens3`。
+
+### 建议脚本菜单
+
+脚本已集成稳定网络优化。主安装菜单提供：
+
+```text
+6. Install stable network profile only
+7. Remove stable network profile only
+8. Show stable network profile status
+```
+
+已安装 entry 后，也可以在 `sb` 管理菜单中使用：
+
+```text
+13. Install stable network profile
+14. Remove stable network profile
+15. Show stable network profile status
+```
+
+也可以直接执行命令：
+
+```sh
+sb stable-install
+sb stable-remove
+sb stable-status
+```
+
+注意：稳定网络优化是可选 profile，不会在安装 DMIT/HK/Home 时自动启用，也不会修改 sing-box 配置或 nftables 防火墙。只有手动选择菜单项或执行 `sb stable-install` 时才会生效。Home 模式的 `sb` 管理器不内置这些菜单项，如需在 Home 机器上使用，请从主安装菜单选择 `6/7/8`。
+
+安装后应创建：
+
+```text
+/etc/sysctl.d/99-dmit-stable.conf
+/etc/systemd/system/tc-htb-fq.service
+```
+
+卸载时应删除上面两个文件，并执行：
+
+```sh
+systemctl disable --now tc-htb-fq.service
+systemctl daemon-reload
+sysctl --system
+```
+
+### 状态检查
+
+查看 sysctl：
+
+```sh
+sysctl net.core.default_qdisc
+sysctl net.ipv4.tcp_congestion_control
+sysctl net.ipv4.tcp_mtu_probing
+sysctl net.ipv4.tcp_limit_output_bytes
+```
+
+查看限速和队列：
+
+```sh
+tc -s qdisc show dev eth0
+tc -s class show dev eth0
+```
+
+正常应能看到：
+
+```text
+qdisc htb ... root
+qdisc fq ... parent 1:10
+class htb 1:10 ... rate 800Mbit ceil 800Mbit
+```
+
+### 浏览器 QUIC
+
+如果 YouTube 仍然提示网络中断，优先禁用浏览器 QUIC：
+
+```text
+chrome://flags/#enable-quic
+```
+
+将 `Experimental QUIC protocol` 设置为 `Disabled`，然后重启浏览器。
+
+实测中，DMIT EB CORONA 在禁用 QUIC 后，YouTube 通常会从 UDP/QUIC 回落到 TCP，稳定性明显提升。
+
+### 影响和取舍
+
+这套优化的主要取舍：
+
+- 机器出口峰值会被限制在约 `800mbit`，无法跑满 2G 口。
+- 限速作用于整台机器的出站流量，包括 sing-box、scp、apt 下载等。
+- `fq` 是按 flow 公平，不是按用户公平；多线程下载会比单线程占更多份额。
+- 对代理下载场景有效，因为大流量方向通常是 `DMIT -> 客户端`，也就是服务端出站。
+
+如果主要用途是 sing-box 代理、YouTube、Telegram 和日常下载，推荐固定 `800mbit`。如果追求更高峰值，可以临时测试 `900mbit`，但长期稳定档建议保持 `800mbit`。
