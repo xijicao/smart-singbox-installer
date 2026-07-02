@@ -1,0 +1,8 @@
+# 不要把真实服务器配置和密钥上传到 GitHub
+/etc/sing-box/
+*.env
+*.log
+*.bak
+config.json
+singbox-entry-info.txt
+singbox-home-info.txt
