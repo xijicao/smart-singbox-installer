@@ -1,354 +1,259 @@
-# smart-singbox-installer-final
+# Smart sing-box Installer
 
-Debian 专用的 sing-box 入口机 / 落地机安装与管理脚本。
+自用 sing-box 安装脚本，主要用于：
 
-这版是按以下实际架构整理的：
+- DMIT / HK 入口机：Reality inbound。
+- Home / LXC / 落地机：SS2022 landing、Reality direct，或两者同时启用。
+- DMIT / HK 导入落地机生成的 `ss://`，自动生成 Reality 中转节点。
 
-- **DMIT 美西**：主力 Entry 入口机，使用 DMIT 专属网络 profile。
-- **HK / JP / SG / EU / 其他线路机**：Generic Entry 入口机，默认不限速，只做基础优化。
-- **netcup DE / 普通 VPS / 家宽 NAT**：Landing 落地机，默认 SS2022，只给 Entry 导入。
+## 先改 SSH 端口
 
-脚本目标不是做面板，而是做到：
+入口机会启用 nftables 防火墙，只放行：
 
-- 安装稳
-- 链接清楚
-- 用户好删
-- 日志不爆
-- 网络 profile 可回滚
-- 配置改动前自动备份，改动后先 `sing-box check`
-
----
-
-## 1. 系统要求
-
-仅支持 Debian：
-
-- Debian 13：推荐用于新重建机器
-- Debian 12：兼容，可继续用到 LTS 周期
-
-不支持 Alpine、OpenWrt、CentOS、Ubuntu。本版故意收窄系统范围，减少维护复杂度。
-
----
-
-## 2. 快速安装
-
-推荐从 GitHub 直接拉取安装。下面默认使用本仓库地址：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh | sh
+```text
+TCP 443              sing-box Reality
+TCP 你的 SSH 端口     SSH
 ```
 
-如果你 fork 到自己的 GitHub，把 `xijicao/smart-singbox-installer` 改成你自己的 `用户名/仓库名` 即可。
+安装前建议先把 SSH 改成自己的高位端口，例如 `51398`。
 
-也可以先下载到本地检查后再执行：
+```sh
+nano /etc/ssh/sshd_config
+```
 
-```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh
+找到：
+
+```text
+#Port 22
+```
+
+改成：
+
+```text
+Port 51398
+```
+
+检查 SSH 配置并重启：
+
+```sh
+sshd -t
+systemctl restart ssh
+```
+
+如果服务名是 `sshd`：
+
+```sh
+systemctl restart sshd
+```
+
+不要关闭当前 SSH 窗口。新开一个窗口测试：
+
+```sh
+ssh -p 51398 root@你的服务器IP
+```
+
+确认新端口能登录后，再运行安装脚本。安装入口机时，`SSH port to allow in firewall` 必须填写这个真实 SSH 端口。
+
+## 安装
+
+Debian / Ubuntu 如果没有 curl，先安装：
+
+```sh
+apt-get update && apt-get install -y curl ca-certificates
+```
+
+下载后执行：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh -o install.sh
 chmod +x install.sh
-./install.sh
+sh install.sh
 ```
 
-如果你是手动上传或解压 ZIP，也可以在项目目录里运行：
-
-```bash
-chmod +x install.sh
-./install.sh
-```
-
-安装菜单：
+菜单：
 
 ```text
-1) 安装 Entry 入口机
-2) 安装 Landing 落地机
-3) 只安装/更新管理命令 sb
+1. DMIT Debian entry
+2. HK Debian entry
+3. Home landing/direct
+4. Add ss:// to this entry
+5. Purge current install without backup
+6. Purge all, including nftables firewall
+7. Install stable network profile only
+8. Remove stable network profile only
+9. Show stable network profile status
+0. Exit
 ```
 
-安装完成后会复制管理命令到：
+## 安装后检查
+
+检查 sing-box 配置：
+
+```sh
+sing-box check -c /etc/sing-box/config.json
+```
+
+看服务状态：
+
+```sh
+systemctl status sing-box --no-pager
+journalctl -u sing-box -n 100 --no-pager
+```
+
+看监听端口：
+
+```sh
+ss -tulpn | grep -E '(:443|:8443|sing-box|sshd)'
+```
+
+如果你改了 SSH 端口，把命令里的端口也加进去，例如：
+
+```sh
+ss -tulpn | grep -E '(:51398|:443|:8443|sing-box|sshd)'
+```
+
+看 nftables 是否开机启动：
+
+```sh
+systemctl is-enabled nftables
+systemctl status nftables --no-pager
+nft list ruleset
+```
+
+入口机正常应看到类似：
 
 ```text
-/usr/local/bin/sb
+tcp dport 51398 accept
+tcp dport 443 accept
 ```
 
----
+Home / landing 模式默认不主动写 nftables；云厂商安全组或面板防火墙仍需手动放行对应端口。
 
-## 3. Entry 入口机
+## 管理命令
 
-Entry 是给朋友客户端直连的机器。
+入口机：
 
-适合：
-
-- DMIT 主力机
-- HK 备用机
-- 日本 / 新加坡 / 欧洲 / 韩国等线路机
-- 未来新增的任意优化线路机
-
-Entry 支持：
-
-- Reality only
-- SS2022 only
-- Reality + SS2022
-- 添加/删除 Reality 用户
-- 添加/删除 SS2022 用户
-- 导入 Landing 落地节点
-- 生成 Reality -> Landing 的共用 relay 链接
-
-### Entry 类型
-
-安装时会问：
-
-```text
-1) DMIT optimized entry
-2) Generic entry（HK/JP/SG/EU/其他线路机）
-```
-
-区别：
-
-| 类型 | 用途 | 网络策略 |
-|---|---|---|
-| DMIT optimized | DMIT 美西主力机 | 可选 800M / 900M / 1000M profile |
-| Generic entry | HK、日本、新加坡、欧洲等 | 默认不限速，只做 BBR + fq |
-
-HK 不单独作为安装类型，因为它和 Generic entry 技术逻辑一样，只是节点名前缀填 `HK`。
-
----
-
-## 4. Landing 落地机
-
-Landing 是给 Entry 拉的出口机，不直接作为朋友主入口。
-
-适合：
-
-- netcup 德国 1 欧机
-- 普通欧洲 VPS
-- 家宽 NAT 机器
-- LXC / 小鸡落地
-
-Landing 类型：
-
-```text
-1) Generic landing（netcup/普通 VPS/德国落地）
-2) Home/NAT landing（家宽/NAT/端口映射）
-```
-
-Landing 默认只安装 SS2022，并输出一个：
-
-```text
-ss://...
-```
-
-然后在 Entry 机器上导入：
-
-```bash
-sb add-landing netcup-de 'ss://...'
-```
-
-导入后 Entry 会生成类似：
-
-```text
-DMIT-US-DE-netcup-de
-```
-
-这是 Reality 入口 -> netcup DE SS2022 落地的共用链路。
-
----
-
-## 5. 常用命令
-
-### 查看链接
-
-```bash
+```sh
+sb
 sb links
-```
-
-### Reality 用户
-
-```bash
-sb add-reality friend1
-sb del-reality friend1
-```
-
-兼容旧命令：
-
-```bash
-sb add-friend friend1
-sb del-user friend1
-```
-
-### SS2022 用户
-
-```bash
-sb add-ss-user friend1
-sb del-ss-user friend1
-```
-
-### Landing 落地
-
-```bash
-sb add-landing netcup-de 'ss://...'
-sb del-landing netcup-de
-```
-
-兼容旧命令：
-
-```bash
+sb test
+sb backup
+sb restore-latest
+sb list-relays
 sb add-ss 'ss://...'
+sb del-relay relay-xxx
+sb add-friend fr1
+sb del-user fr1
+sb restart
+sb stable-install
+sb stable-remove
+sb stable-status
+sb uninstall
+sb purge
+sb purge-all
 ```
 
----
+Home / landing：
 
-## 6. 网络 profile
-
-### Generic 基础优化
-
-适合 HK / JP / SG / EU / netcup / 家宽落地：
-
-```bash
-sb net-install basic
+```sh
+sb
+sb info
+sb test
+sb status
+sb restart
+sb reset-ss
+sb uninstall
+sb purge
+sb purge-all
 ```
 
-效果：
+## 卸载
+
+保守卸载，带备份，保留 nftables：
+
+```sh
+sb uninstall
+```
+
+无备份清理，保留 nftables：
+
+```sh
+sb purge
+```
+
+完全清理，包括 nftables 防火墙规则：
+
+```sh
+sb purge-all
+```
+
+如果 `sb` 已经损坏，可以重新下载 `install.sh` 后运行：
+
+```sh
+sh install.sh
+```
+
+然后选择：
 
 ```text
-BBR + fq
-tcp_mtu_probing=1
-tcp_limit_output_bytes=512KB
-不做 HTB 限速
-不强制 32MB rmem/wmem
+5. Purge current install without backup
 ```
 
-### DMIT profile
+或完全清理：
 
-```bash
-sb net-install dmit-safe
-sb net-install dmit-balanced
-sb net-install dmit-performance
+```text
+6. Purge all, including nftables firewall
 ```
 
-对应：
+注意：`purge-all` 会执行 `nft flush ruleset` 并删除 `/etc/nftables.conf`，只建议在你确认不会因此断开 SSH 或暴露机器时使用。
 
-| profile | 速率 | tcp_limit_output_bytes | rmem/wmem |
-|---|---:|---:|---:|
-| dmit-safe | 800mbit | 512KB | 不强制 |
-| dmit-balanced | 900mbit | 1MB | 32MB |
-| dmit-performance | 1000mbit | 1MB | 32MB |
+## Home / LXC 模式端口
 
-自定义：
+选择 `3. Home landing/direct` 后：
 
-```bash
-sb net-install custom 1200mbit
+```text
+1. SS2022 landing only
+2. Reality direct only
+3. SS2022 landing + Reality direct
 ```
 
-移除 HTB 限速：
+SS2022 会询问：
 
-```bash
-sb net-install remove
+```text
+SS internal listen port
+SS public mapped port
 ```
 
-不建议把 2G 作为长期日常档。2G 可以测试，但给朋友长期共享建议优先稳定。
+普通公网 VPS 可以两个都填一样。LXC / NAT 场景要区分内部监听端口和公网映射端口。
 
----
+例如：
 
-## 7. 观测与诊断
-
-即时查看，不写长期日志：
-
-```bash
-sb net-status
+```text
+公网 TCP 24496 -> LXC TCP 443
 ```
 
-短时观测，不落盘：
+则填写：
 
-```bash
-sb net-watch 60
+```text
+SS internal listen port: 443
+SS public mapped port: 24496
 ```
 
-完整诊断：
+生成的 `ss://` 会使用公网端口 `24496`。
 
-```bash
-sb doctor
-```
+## sing-box 1.13+ 兼容
 
-`sb doctor` 会输出：
-
-- 系统版本
-- sing-box 版本
-- `sing-box check` 结果
-- 监听端口
-- nftables 防火墙摘要
-- 最近 sing-box 日志
-- 当前 TCP / tc 状态
-- journald 占用
-
----
-
-## 8. 日志策略
-
-sing-box 默认：
+新版 sing-box 已经移除旧 inbound 字段，本脚本不再生成：
 
 ```json
-"log": {
-  "level": "warn",
-  "timestamp": true
-}
+"sniff": true
+"sniff_override_destination": true
 ```
 
-不写独立日志文件，默认走 systemd journal。
-
-脚本会写入 journald 限制：
-
-```ini
-SystemMaxUse=200M
-SystemMaxFileSize=50M
-MaxRetentionSec=14day
-```
-
-查看日志占用：
-
-```bash
-journalctl --disk-usage
-```
-
----
-
-## 9. 安全提醒
-
-以下文件包含密钥或节点信息：
+脚本也不再生成容易触发兼容提示的 `dns.strategy`。如果你用旧配置遇到类似错误：
 
 ```text
-/etc/sing-box/config.json
-/etc/sing-box/sb.env
-/etc/sing-box/backups/
+legacy inbound fields are deprecated ... removed in sing-box 1.13.0
 ```
 
-不要公开上传到 GitHub。
-
-如果要把项目放到自己的 GitHub，只上传本仓库脚本和文档，不要上传服务器上的 `/etc/sing-box`。
-
----
-
-## 10. 推荐机器分工
-
-```text
-DMIT-US：Entry -> DMIT optimized -> dmit-balanced
-HK：Entry -> Generic entry -> basic
-未来 JP/SG/EU 线路机：Entry -> Generic entry -> basic 或 custom
-netcup DE：Landing -> Generic landing -> basic
-家宽 NAT：Landing -> Home/NAT landing -> basic
-```
-
----
-
-## 11. 已知设计取舍
-
-本版没有做：
-
-- SSH priority
-- 默认 BBRv3
-- 默认 CAKE
-- 默认 2G profile
-- 流量统计 / 到期时间 / 限速用户
-- Web 面板
-- 订阅转换
-- Alpine/Ubuntu/OpenWrt 支持
-
-这些不是不能做，而是当前目标是少维护、可预测。
+说明旧配置里还有这些字段，重新用新版脚本安装或手动删除即可。

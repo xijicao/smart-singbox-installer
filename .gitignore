@@ -1,8 +1,22 @@
-# 不要把真实服务器配置和密钥上传到 GitHub
-/etc/sing-box/
-*.env
-*.log
-*.bak
+# sing-box generated configs / secrets
 config.json
-singbox-entry-info.txt
-singbox-home-info.txt
+entry.env
+home.env
+singbox-*.txt
+*singbox-info.txt
+*_info.txt
+
+# backups / logs / keys
+*.bak
+*.tar.gz
+*.log
+*.env
+.env
+*.key
+*.pem
+
+# local scratch
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
