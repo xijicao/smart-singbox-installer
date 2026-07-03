@@ -250,7 +250,13 @@ SS public mapped port: 24496
 "sniff_override_destination": true
 ```
 
-脚本也不再生成容易触发兼容提示的 `dns.strategy`。如果你用旧配置遇到类似错误：
+脚本保留顶层 DNS 策略：
+
+```json
+"strategy": "prefer_ipv4"
+```
+
+这只影响 sing-box 出站解析目标域名时优先选择 IPv4，不影响客户端用 IPv6 连接你的服务器。如果你用旧配置遇到类似错误：
 
 ```text
 legacy inbound fields are deprecated ... removed in sing-box 1.13.0

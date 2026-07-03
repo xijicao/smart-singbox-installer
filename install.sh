@@ -400,7 +400,8 @@ entry_config() {
   "log": { "level": "warn", "timestamp": true },
   "dns": {
     "servers": [{ "type": "local", "tag": "dns_local" }],
-    "final": "dns_local"
+    "final": "dns_local",
+    "strategy": "prefer_ipv4"
   },
   "inbounds": [{
     "type": "vless",
@@ -1095,7 +1096,8 @@ write_home_config() {
   "log": { "level": "warn", "timestamp": true },
   "dns": {
     "servers": [{ "type": "local", "tag": "dns_local" }],
-    "final": "dns_local"
+    "final": "dns_local",
+    "strategy": "prefer_ipv4"
   },
   "inbounds": [
 EOF
