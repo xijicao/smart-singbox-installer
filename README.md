@@ -111,6 +111,7 @@ sh install.sh
 ```text
 自动获取公网 IPv4，Reality 链接使用这个 IPv4
 问你有没有 IPv6，完全按你的回答决定是否安装 SS2022
+手动输入 Reality SNI / 伪装站点
 有 IPv6：安装 Reality + SS2022
 没 IPv6：只安装 Reality
 固定生成 CAO / WEI / TAO 三个用户
@@ -143,6 +144,7 @@ TCP 443
 只生成一个用户
 协议由你选择，和有没有 IPv6 不绑定
 问你有没有 IPv6，只影响 SS2022 链接使用 IPv6 还是 IPv4
+启用 Reality 时，手动输入 Reality SNI / 伪装站点
 Reality 固定 443
 SS2022 固定 8443
 ```

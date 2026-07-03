@@ -1286,6 +1286,7 @@ install_entry() {
   else
     ENABLE_SS="0"
   fi
+  REALITY_SNI="$(ask "Reality SNI / camouflage site" "$REALITY_SNI")"
   SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
   validate_port "SSH port" "$SSH_PORT"
 
@@ -1808,7 +1809,7 @@ install_home() {
     REALITY_PUBLIC_PORT="443"
     validate_port "Reality internal listen port" "$REALITY_PORT"
     validate_port "Reality public mapped port" "$REALITY_PUBLIC_PORT"
-    REALITY_SNI="$(ask "Reality SNI" "${REALITY_SNI:-www.sony.jp}")"
+    REALITY_SNI="$(ask "Reality SNI / camouflage site" "${REALITY_SNI:-www.sony.jp}")"
     REALITY_UUID="$(random_uuid)"
     REALITY_SID="$(random_hex8)"
     reality_keypair
