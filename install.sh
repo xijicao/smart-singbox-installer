@@ -39,6 +39,16 @@ ask() {
   printf '%s' "${value:-$default}"
 }
 
+ask_yes_no() {
+  prompt="$1"
+  default="${2:-n}"
+  answer="$(ask "$prompt (y/n)" "$default")"
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 detect_os() {
   [ -r /etc/os-release ] || die "Cannot read /etc/os-release."
   OS_ID="$(. /etc/os-release && printf '%s' "${ID}")"
@@ -118,6 +128,22 @@ public_ip() {
     [ -n "$ip" ] && { printf '%s' "$ip"; return; }
   done
   printf 'YOUR_SERVER_IP'
+}
+
+public_ipv4() {
+  for u in https://api.ipify.org https://ipv4.icanhazip.com https://ifconfig.me/ip; do
+    ip="$(curl -4 -fsSL --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    [ -n "$ip" ] && { printf '%s' "$ip"; return; }
+  done
+  printf 'YOUR_SERVER_IPV4'
+}
+
+public_ipv6() {
+  for u in https://api64.ipify.org https://ipv6.icanhazip.com; do
+    ip="$(curl -6 -fsSL --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
+    [ -n "$ip" ] && { printf '%s' "$ip"; return; }
+  done
+  printf 'YOUR_SERVER_IPV6'
 }
 
 reality_keypair() {
@@ -259,9 +285,95 @@ install_stable_net_profile() {
   [ "$OS_FAMILY" = "debian" ] || die "Stable network profile currently supports Debian/Ubuntu with systemd."
   command -v systemctl >/dev/null 2>&1 || die "Stable network profile requires systemd."
 
-  dev="${1:-}"
+  profile="${1:-}"
+  if [ -z "$profile" ]; then
+    log "Network profile:"
+    log "1. basic             BBR + fq + MTU probing, no HTB limit"
+    log "2. dmit-safe         800mbit HTB + conservative TCP output limit"
+    log "3. dmit-balanced     900mbit HTB + larger TCP output/buffer, recommended for DMIT"
+    log "4. dmit-performance  1000mbit HTB + larger TCP output/buffer"
+    log "5. custom            custom HTB rate + larger TCP output/buffer"
+    profile="$(ask "Choose profile" "dmit-balanced")"
+    case "$profile" in
+      1) profile="basic" ;;
+      2) profile="dmit-safe" ;;
+      3) profile="dmit-balanced" ;;
+      4) profile="dmit-performance" ;;
+      5) profile="custom" ;;
+    esac
+  fi
+
+  case "$profile" in
+    basic)
+      rate=""
+      limit="524288"
+      buffer32="0"
+      ;;
+    dmit-safe|safe)
+      profile="dmit-safe"
+      rate="800mbit"
+      limit="524288"
+      buffer32="0"
+      ;;
+    dmit-balanced|balanced)
+      profile="dmit-balanced"
+      rate="900mbit"
+      limit="1048576"
+      buffer32="1"
+      ;;
+    dmit-performance|performance)
+      profile="dmit-performance"
+      rate="1000mbit"
+      limit="1048576"
+      buffer32="1"
+      ;;
+    custom)
+      rate="${2:-}"
+      [ -n "$rate" ] || rate="$(ask "Custom HTB rate, for example 750mbit or 1gbit" "800mbit")"
+      limit="1048576"
+      buffer32="1"
+      ;;
+    *)
+      die "Unknown network profile: $profile"
+      ;;
+  esac
+
+  dev="${3:-}"
+  if [ "$profile" != "custom" ] && [ -z "$dev" ]; then
+    dev="${2:-}"
+  fi
   [ -n "$dev" ] || dev="$(default_netdev)"
   [ -n "$dev" ] || die "Cannot detect default network interface. Pass interface name manually."
+
+  cat > /etc/sysctl.d/99-dmit-stable.conf <<EOF
+# smart-singbox network profile: ${profile}
+# BBR + fq is the common low-latency TCP baseline.
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+# tcp_mtu_probing=1 helps avoid some MTU blackhole problems.
+net.ipv4.tcp_mtu_probing=1
+# Lower values are safer; higher values may improve throughput on stable lines.
+net.ipv4.tcp_limit_output_bytes=${limit}
+EOF
+  if [ "$buffer32" = "1" ]; then
+    cat >> /etc/sysctl.d/99-dmit-stable.conf <<'EOF'
+# 32MB is the TCP autotuning ceiling, not fixed memory per connection.
+net.core.rmem_max=33554432
+net.core.wmem_max=33554432
+net.ipv4.tcp_rmem=4096 87380 33554432
+net.ipv4.tcp_wmem=4096 16384 33554432
+EOF
+  fi
+  sysctl --system
+
+  if [ -z "$rate" ]; then
+    systemctl disable --now tc-htb-fq.service 2>/dev/null || true
+    rm -f /etc/systemd/system/tc-htb-fq.service
+    systemctl daemon-reload 2>/dev/null || true
+    log "Network profile ${profile} installed on ${dev}: BBR + fq, no HTB limit."
+    stable_net_status "$dev"
+    return
+  fi
 
   if ! command -v tc >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
@@ -271,17 +383,9 @@ install_stable_net_profile() {
   tc_bin="$(command -v tc)"
   [ -n "$tc_bin" ] || die "tc command not found after installing iproute2."
 
-  cat > /etc/sysctl.d/99-dmit-stable.conf <<'EOF'
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-net.ipv4.tcp_mtu_probing=1
-net.ipv4.tcp_limit_output_bytes=524288
-EOF
-  sysctl --system
-
   cat > /etc/systemd/system/tc-htb-fq.service <<EOF
 [Unit]
-Description=HTB 800M limit with fq for ${dev}
+Description=${profile} HTB ${rate} limit with fq for ${dev}
 After=network-online.target
 Wants=network-online.target
 
@@ -289,7 +393,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=${tc_bin} qdisc replace dev ${dev} root handle 1: htb default 10
-ExecStart=${tc_bin} class replace dev ${dev} parent 1: classid 1:10 htb rate 800mbit ceil 800mbit
+ExecStart=${tc_bin} class replace dev ${dev} parent 1: classid 1:10 htb rate ${rate} ceil ${rate}
 ExecStart=${tc_bin} qdisc replace dev ${dev} parent 1:10 handle 10: fq
 ExecStop=${tc_bin} qdisc del dev ${dev} root
 
@@ -299,7 +403,7 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now tc-htb-fq.service
-  log "Stable network profile installed on ${dev} with 800mbit HTB + fq."
+  log "Network profile ${profile} installed on ${dev} with ${rate} HTB + fq."
   stable_net_status "$dev"
 }
 
@@ -327,6 +431,10 @@ stable_net_status() {
   sysctl net.ipv4.tcp_congestion_control || true
   sysctl net.ipv4.tcp_mtu_probing || true
   sysctl net.ipv4.tcp_limit_output_bytes || true
+  sysctl net.core.rmem_max || true
+  sysctl net.core.wmem_max || true
+  sysctl net.ipv4.tcp_rmem || true
+  sysctl net.ipv4.tcp_wmem || true
   log ""
   log "== tc qdisc (${dev}) =="
   tc -s qdisc show dev "$dev" || true
@@ -344,7 +452,7 @@ enable_entry_firewall() {
   current_ssh_port="$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $4}')"
   if [ "${FORCE_ENTRY_FIREWALL:-0}" != "1" ] && [ "$current_ssh_port" != "$SSH_PORT" ]; then
     log ""
-    log "WARNING: DMIT/HK firewall will allow inbound TCP 443 and TCP ${SSH_PORT} only."
+    log "WARNING: firewall will allow SSH TCP ${SSH_PORT}, enabled Reality TCP 443, and enabled SS2022 ports only."
     log "Current SSH server port looks like: ${current_ssh_port:-unknown}."
     log "Please move SSH to TCP ${SSH_PORT} before enabling this firewall."
     printf "Type ENTRYFW to continue anyway: " > /dev/tty
@@ -353,7 +461,8 @@ enable_entry_firewall() {
   elif [ "${FORCE_ENTRY_FIREWALL:-0}" != "1" ]; then
     log ""
     log "WARNING: This will enable the entry firewall."
-    log "Inbound TCP 443 is for sing-box Reality."
+    [ "${ENABLE_REALITY:-1}" = "1" ] && log "Inbound TCP 443 is for sing-box Reality."
+    [ "${ENABLE_SS:-0}" = "1" ] && log "Inbound TCP/UDP 8443 is for SS2022."
     log "Inbound TCP ${SSH_PORT} is for SSH."
     log "Make sure you have provider console/rescue access before continuing."
     printf "Type ENTRYFW to continue: " > /dev/tty
@@ -374,7 +483,19 @@ table inet filter {
     ip protocol icmp accept
     ip6 nexthdr ipv6-icmp accept
     tcp dport ${SSH_PORT} accept
+EOF
+  if [ "${ENABLE_REALITY:-1}" = "1" ]; then
+    cat >> /etc/nftables.conf <<'EOF'
     tcp dport 443 accept
+EOF
+  fi
+  if [ "${ENABLE_SS:-0}" = "1" ]; then
+    cat >> /etc/nftables.conf <<'EOF'
+    tcp dport 8443 accept
+    udp dport 8443 accept
+EOF
+  fi
+  cat >> /etc/nftables.conf <<'EOF'
   }
 
   chain forward {
@@ -395,53 +516,75 @@ EOF
 entry_config() {
   mkdir -p "$CONFIG_DIR"
   chmod 700 "$CONFIG_DIR"
-  cat > "$CONFIG_PATH" <<EOF
-{
-  "log": { "level": "warn", "timestamp": true },
-  "dns": {
-    "servers": [{ "type": "local", "tag": "dns_local" }],
-    "final": "dns_local",
-    "strategy": "prefer_ipv4"
-  },
-  "inbounds": [{
-    "type": "vless",
-    "tag": "reality-in",
-    "listen": "::",
-    "listen_port": 443,
-    "users": [{
-      "name": "me",
-      "uuid": "$ME_UUID",
-      "flow": "xtls-rprx-vision"
-    }],
-    "tls": {
-      "enabled": true,
-      "server_name": "$REALITY_SNI",
-      "reality": {
-        "enabled": true,
-        "handshake": { "server": "$REALITY_SNI", "server_port": 443 },
-        "private_key": "$REALITY_PRIVATE_KEY",
-        "short_id": ["$ME_SID"]
-      }
-    }
-  }],
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct",
-      "domain_resolver": {
-        "server": "dns_local"
-      }
+  export CONFIG_PATH REALITY_SNI REALITY_PRIVATE_KEY ENTRY_USERS ENTRY_UUIDS ENTRY_SIDS ENABLE_SS SS_METHOD SS_SERVER_PASSWORD SS_USER_PASSWORDS
+  python3 - <<'PY'
+import json, os
+
+def split(name):
+    return [x for x in os.environ.get(name, "").split(",") if x]
+
+users = split("ENTRY_USERS")
+uuids = split("ENTRY_UUIDS")
+sids = split("ENTRY_SIDS")
+ss_passwords = split("SS_USER_PASSWORDS")
+
+cfg = {
+    "log": {"level": "warn", "timestamp": True},
+    "dns": {
+        "servers": [{"type": "local", "tag": "dns_local"}],
+        "final": "dns_local",
+        "strategy": "prefer_ipv4",
     },
-    { "type": "block", "tag": "block" }
-  ],
-  "route": {
-    "default_domain_resolver": "dns_local",
-    "auto_detect_interface": true,
-    "rules": [],
-    "final": "direct"
-  }
+    "inbounds": [{
+        "type": "vless",
+        "tag": "reality-in",
+        "listen": "::",
+        "listen_port": 443,
+        "users": [
+            {"name": name, "uuid": uuids[i], "flow": "xtls-rprx-vision"}
+            for i, name in enumerate(users)
+        ],
+        "tls": {
+            "enabled": True,
+            "server_name": os.environ["REALITY_SNI"],
+            "reality": {
+                "enabled": True,
+                "handshake": {"server": os.environ["REALITY_SNI"], "server_port": 443},
+                "private_key": os.environ["REALITY_PRIVATE_KEY"],
+                "short_id": sids,
+            },
+        },
+    }],
+    "outbounds": [
+        {"type": "direct", "tag": "direct", "domain_resolver": {"server": "dns_local"}},
+        {"type": "block", "tag": "block"},
+    ],
+    "route": {
+        "default_domain_resolver": "dns_local",
+        "auto_detect_interface": True,
+        "rules": [],
+        "final": "direct",
+    },
 }
-EOF
+
+if os.environ.get("ENABLE_SS") == "1":
+    cfg["inbounds"].append({
+        "type": "shadowsocks",
+        "tag": "ss-in",
+        "listen": "::",
+        "listen_port": 8443,
+        "method": os.environ.get("SS_METHOD", "2022-blake3-aes-128-gcm"),
+        "password": os.environ["SS_SERVER_PASSWORD"],
+        "users": [
+            {"name": name, "password": ss_passwords[i]}
+            for i, name in enumerate(users)
+        ],
+    })
+
+with open(os.environ["CONFIG_PATH"], "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
   chmod 600 "$CONFIG_PATH"
 }
 
@@ -450,6 +593,10 @@ write_entry_meta() {
 NODE_ROLE="$NODE_ROLE"
 NODE_PREFIX="$NODE_PREFIX"
 ACCESS_HOST="$ACCESS_HOST"
+SS_ACCESS_HOST="${SS_ACCESS_HOST:-}"
+ENABLE_SS="${ENABLE_SS:-0}"
+SS_METHOD="${SS_METHOD:-}"
+SS_SERVER_PASSWORD="${SS_SERVER_PASSWORD:-}"
 REALITY_SNI="$REALITY_SNI"
 REALITY_PUBLIC_KEY="$REALITY_PUBLIC_KEY"
 REALITY_PRIVATE_KEY="$REALITY_PRIVATE_KEY"
@@ -563,12 +710,20 @@ def parse_ss_link(link):
         if ":" not in left:
             left = b64decode_any(left)
         method, password = left.split(":", 1)
-        host, port = right.rsplit(":", 1)
+        if right.startswith("["):
+            host, port = right.rsplit("]:", 1)
+            host = host[1:]
+        else:
+            host, port = right.rsplit(":", 1)
     else:
         decoded = b64decode_any(body)
         left, right = decoded.rsplit("@", 1)
         method, password = left.split(":", 1)
-        host, port = right.rsplit(":", 1)
+        if right.startswith("["):
+            host, port = right.rsplit("]:", 1)
+            host = host[1:]
+        else:
+            host, port = right.rsplit(":", 1)
 
     host = host.strip("[]")
     return {
@@ -592,17 +747,44 @@ def link_for_user(name, user, sid):
         f"#{quote(prefix + '-' + name)}"
     )
 
+def display_host(host):
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+def ss_link_for_user(name, user):
+    meta = load_meta()
+    host = display_host(meta.get("SS_ACCESS_HOST") or meta.get("ACCESS_HOST", "YOUR_SERVER_IP"))
+    method = meta.get("SS_METHOD", "2022-blake3-aes-128-gcm")
+    server_password = meta.get("SS_SERVER_PASSWORD", "")
+    prefix = meta.get("NODE_PREFIX", "ENTRY")
+    user_password = user.get("password", "")
+    raw = f"{method}:{server_password}:{user_password}"
+    encoded = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+    return f"ss://{encoded}@{host}:8443#{quote(prefix + '-SS-' + name)}"
+
 def list_links():
     cfg = load_cfg()
     ib = inbound(cfg)
     sids = ib.get("tls", {}).get("reality", {}).get("short_id", [])
     users = ib.get("users", [])
+    print("===== Reality =====")
     for i, user in enumerate(users):
         name = user.get("name", f"user{i+1}")
         sid = sids[i] if i < len(sids) else (sids[0] if sids else "")
         print()
         print(name)
         print(link_for_user(name, user, sid))
+    for item in cfg.get("inbounds", []):
+        if item.get("type") == "shadowsocks" and item.get("tag") == "ss-in":
+            print()
+            print("===== SS2022 =====")
+            for user in item.get("users", []):
+                name = user.get("name", "user")
+                print()
+                print(name)
+                print(ss_link_for_user(name, user))
+            break
 
 def add_friend(name):
     name = safe_name(name)
@@ -728,10 +910,87 @@ def default_netdev():
         pass
     return "eth0"
 
-def install_stable_net_profile(dev=None):
+def install_stable_net_profile(profile=None, rate=None, dev=None):
     if not shutil.which("systemctl"):
         raise SystemExit("Stable network profile requires systemd.")
+
+    valid_profiles = {
+        "basic": ("", "524288", False),
+        "dmit-safe": ("800mbit", "524288", False),
+        "safe": ("800mbit", "524288", False),
+        "dmit-balanced": ("900mbit", "1048576", True),
+        "balanced": ("900mbit", "1048576", True),
+        "dmit-performance": ("1000mbit", "1048576", True),
+        "performance": ("1000mbit", "1048576", True),
+    }
+    if profile and profile not in valid_profiles and profile != "custom" and dev is None:
+        dev = profile
+        profile = None
+    if not profile:
+        print("Network profile:")
+        print("1. basic             BBR + fq + MTU probing, no HTB limit")
+        print("2. dmit-safe         800mbit HTB + conservative TCP output limit")
+        print("3. dmit-balanced     900mbit HTB + larger TCP output/buffer, recommended for DMIT")
+        print("4. dmit-performance  1000mbit HTB + larger TCP output/buffer")
+        print("5. custom            custom HTB rate + larger TCP output/buffer")
+        profile = input("Choose profile [dmit-balanced]: ").strip() or "dmit-balanced"
+        profile = {
+            "1": "basic",
+            "2": "dmit-safe",
+            "3": "dmit-balanced",
+            "4": "dmit-performance",
+            "5": "custom",
+        }.get(profile, profile)
+
+    if profile == "custom":
+        rate = rate or input("Custom HTB rate, for example 750mbit or 1gbit [800mbit]: ").strip() or "800mbit"
+        limit = "1048576"
+        buffer32 = True
+    else:
+        if profile not in valid_profiles:
+            raise SystemExit(f"Unknown network profile: {profile}")
+        if rate and dev is None:
+            dev = rate
+        rate, limit, buffer32 = valid_profiles[profile]
+        if profile == "safe":
+            profile = "dmit-safe"
+        elif profile == "balanced":
+            profile = "dmit-balanced"
+        elif profile == "performance":
+            profile = "dmit-performance"
+
     dev = dev or default_netdev()
+
+    sysctl_text = (
+        f"# smart-singbox network profile: {profile}\n"
+        "# BBR + fq is the common low-latency TCP baseline.\n"
+        "net.core.default_qdisc=fq\n"
+        "net.ipv4.tcp_congestion_control=bbr\n"
+        "# tcp_mtu_probing=1 helps avoid some MTU blackhole problems.\n"
+        "net.ipv4.tcp_mtu_probing=1\n"
+        "# Lower values are safer; higher values may improve throughput on stable lines.\n"
+        f"net.ipv4.tcp_limit_output_bytes={limit}\n"
+    )
+    if buffer32:
+        sysctl_text += (
+            "# 32MB is the TCP autotuning ceiling, not fixed memory per connection.\n"
+            "net.core.rmem_max=33554432\n"
+            "net.core.wmem_max=33554432\n"
+            "net.ipv4.tcp_rmem=4096 87380 33554432\n"
+            "net.ipv4.tcp_wmem=4096 16384 33554432\n"
+        )
+    Path("/etc/sysctl.d/99-dmit-stable.conf").write_text(sysctl_text, encoding="utf-8")
+    subprocess.call(["sysctl", "--system"])
+
+    if not rate:
+        if shutil.which("systemctl"):
+            subprocess.call(["systemctl", "disable", "--now", "tc-htb-fq.service"], stderr=subprocess.DEVNULL)
+        Path("/etc/systemd/system/tc-htb-fq.service").unlink(missing_ok=True)
+        subprocess.call(["systemctl", "daemon-reload"])
+        print(f"Network profile {profile} installed on {dev}: BBR + fq, no HTB limit.")
+        stable_net_status(dev)
+        return
+
     tc_bin = shutil.which("tc")
     if not tc_bin:
         subprocess.check_call(["apt-get", "update"])
@@ -740,17 +999,8 @@ def install_stable_net_profile(dev=None):
     if not tc_bin:
         raise SystemExit("tc command not found after installing iproute2.")
 
-    Path("/etc/sysctl.d/99-dmit-stable.conf").write_text(
-        "net.core.default_qdisc=fq\n"
-        "net.ipv4.tcp_congestion_control=bbr\n"
-        "net.ipv4.tcp_mtu_probing=1\n"
-        "net.ipv4.tcp_limit_output_bytes=524288\n",
-        encoding="utf-8",
-    )
-    subprocess.call(["sysctl", "--system"])
-
     Path("/etc/systemd/system/tc-htb-fq.service").write_text(f"""[Unit]
-Description=HTB 800M limit with fq for {dev}
+Description={profile} HTB {rate} limit with fq for {dev}
 After=network-online.target
 Wants=network-online.target
 
@@ -758,7 +1008,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart={tc_bin} qdisc replace dev {dev} root handle 1: htb default 10
-ExecStart={tc_bin} class replace dev {dev} parent 1: classid 1:10 htb rate 800mbit ceil 800mbit
+ExecStart={tc_bin} class replace dev {dev} parent 1: classid 1:10 htb rate {rate} ceil {rate}
 ExecStart={tc_bin} qdisc replace dev {dev} parent 1:10 handle 10: fq
 ExecStop={tc_bin} qdisc del dev {dev} root
 
@@ -768,7 +1018,7 @@ WantedBy=multi-user.target
 
     subprocess.call(["systemctl", "daemon-reload"])
     subprocess.call(["systemctl", "enable", "--now", "tc-htb-fq.service"])
-    print(f"Stable network profile installed on {dev} with 800mbit HTB + fq.")
+    print(f"Network profile {profile} installed on {dev} with {rate} HTB + fq.")
     stable_net_status(dev)
 
 def remove_stable_net_profile():
@@ -789,6 +1039,10 @@ def stable_net_status(dev=None):
     subprocess.call(["sysctl", "net.ipv4.tcp_congestion_control"])
     subprocess.call(["sysctl", "net.ipv4.tcp_mtu_probing"])
     subprocess.call(["sysctl", "net.ipv4.tcp_limit_output_bytes"])
+    subprocess.call(["sysctl", "net.core.rmem_max"])
+    subprocess.call(["sysctl", "net.core.wmem_max"])
+    subprocess.call(["sysctl", "net.ipv4.tcp_rmem"])
+    subprocess.call(["sysctl", "net.ipv4.tcp_wmem"])
     print(f"\n== tc qdisc ({dev}) ==")
     if shutil.which("tc"):
         subprocess.call(["tc", "-s", "qdisc", "show", "dev", dev])
@@ -987,7 +1241,11 @@ def main():
     elif cmd == "purge-all":
         purge_all()
     elif cmd == "stable-install":
-        install_stable_net_profile(args[1] if len(args) > 1 else None)
+        install_stable_net_profile(
+            args[1] if len(args) > 1 else None,
+            args[2] if len(args) > 2 else None,
+            args[3] if len(args) > 3 else None,
+        )
     elif cmd == "stable-remove":
         remove_stable_net_profile()
     elif cmd == "stable-status":
@@ -1004,7 +1262,7 @@ PYEOF
 
 install_entry() {
   role="$1"
-  [ "$OS_FAMILY" = "debian" ] || die "DMIT/HK entry requires Debian/Ubuntu."
+  [ "$OS_FAMILY" = "debian" ] || die "Entry requires Debian/Ubuntu."
   install_deps
   install_singbox
 
@@ -1014,20 +1272,42 @@ install_entry() {
       NODE_PREFIX="${NODE_PREFIX:-DMIT}"
       REALITY_SNI="${REALITY_SNI:-reed.edu}"
       ;;
-    hk)
-      NODE_ROLE="hk"
-      NODE_PREFIX="${NODE_PREFIX:-HK}"
-      REALITY_SNI="${REALITY_SNI:-www.hkex.com.hk}"
+    other|*)
+      NODE_ROLE="other"
+      NODE_PREFIX="${NODE_PREFIX:-ENTRY}"
+      REALITY_SNI="${REALITY_SNI:-www.microsoft.com}"
       ;;
   esac
 
-  ACCESS_HOST="$(ask "Public IP/domain for Reality links" "$(public_ip)")"
-  REALITY_SNI="$(ask "Reality SNI" "$REALITY_SNI")"
+  NODE_PREFIX="$(safe_label "$(ask "Node name shown in links" "$NODE_PREFIX")")"
+  [ -n "$NODE_PREFIX" ] || NODE_PREFIX="ENTRY"
+  if ask_yes_no "Does this entry machine have usable IPv6? If yes, SS2022 will be installed on 8443" "n"; then
+    ENABLE_SS="1"
+  else
+    ENABLE_SS="0"
+  fi
   SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
   validate_port "SSH port" "$SSH_PORT"
-  ME_UUID="$(random_uuid)"
-  ME_SID="$(random_hex8)"
+
+  ACCESS_HOST="$(public_ipv4)"
+  if [ "$ENABLE_SS" = "1" ]; then
+    SS_ACCESS_HOST="$(public_ipv6)"
+  else
+    SS_ACCESS_HOST=""
+  fi
+
+  ENTRY_USERS="CAO,WEI,TAO"
+  ENTRY_UUIDS="$(random_uuid),$(random_uuid),$(random_uuid)"
+  ENTRY_SIDS="$(random_hex8),$(random_hex8),$(random_hex8)"
   reality_keypair
+  SS_METHOD="2022-blake3-aes-128-gcm"
+  if [ "$ENABLE_SS" = "1" ]; then
+    SS_SERVER_PASSWORD="$(openssl rand -base64 16 | tr -d '\n\r')"
+    SS_USER_PASSWORDS="$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r')"
+  else
+    SS_SERVER_PASSWORD=""
+    SS_USER_PASSWORDS=""
+  fi
 
   entry_config
   write_entry_meta
@@ -1044,7 +1324,14 @@ install_entry() {
   log "Info: $INFO_ENTRY"
   log "Manager: sb"
   log "Add SS landing: sb add-ss 'ss://...'"
-  log "Firewall: inbound TCP 443 and TCP ${SSH_PORT} only."
+  if [ "$ENABLE_SS" = "1" ]; then
+    log "Firewall: inbound TCP ${SSH_PORT}, TCP 443, TCP/UDP 8443."
+  else
+    log "Firewall: inbound TCP ${SSH_PORT} and TCP 443."
+  fi
+  if [ "$NODE_ROLE" = "dmit" ] && ask_yes_no "Install a DMIT network optimization profile now?" "y"; then
+    install_stable_net_profile
+  fi
 }
 
 ss_uri() {
@@ -1054,9 +1341,11 @@ from urllib.parse import quote
 method = "${SS_METHOD}"
 password = "${SS_PASSWORD}"
 host = "${ACCESS_HOST}"
+ss_host = "${SS_LINK_HOST:-$ACCESS_HOST}"
 port = "${SS_PUBLIC_PORT}"
 name = "${HOME_NAME}-SS"
-raw = f"{method}:{password}@{host}:{port}"
+link_host = f"[{ss_host}]" if ":" in ss_host and not ss_host.startswith("[") else ss_host
+raw = f"{method}:{password}@{link_host}:{port}"
 enc = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 print(f"ss://{enc}#{quote(name)}")
 PY
@@ -1068,9 +1357,11 @@ from urllib.parse import quote
 method = "${SS_METHOD}"
 password = "${SS_PASSWORD}"
 host = "${ACCESS_HOST}"
+ss_host = "${SS_LINK_HOST:-$ACCESS_HOST}"
 port = "${SS_PUBLIC_PORT}"
 name = "${HOME_NAME}-SS"
-print(f"ss://{method}:{quote(password, safe='')}@{host}:{port}#{quote(name)}")
+link_host = f"[{ss_host}]" if ":" in ss_host and not ss_host.startswith("[") else ss_host
+print(f"ss://{method}:{quote(password, safe='')}@{link_host}:{port}#{quote(name)}")
 PY
 }
 
@@ -1111,8 +1402,7 @@ EOF
       "listen": "::",
       "listen_port": ${SS_PORT},
       "method": "${SS_METHOD}",
-      "password": "${SS_PASSWORD}",
-      "network": "tcp"
+      "password": "${SS_PASSWORD}"
     }
 EOF
     sep=","
@@ -1203,6 +1493,7 @@ from urllib.parse import quote
 name = "${HOME_NAME}"
 mode = "${HOME_MODE}"
 host = "${ACCESS_HOST}"
+ss_host = "${SS_LINK_HOST:-$ACCESS_HOST}"
 print("Home SS landing installed")
 print("=========================")
 print(f"name: {name}")
@@ -1213,7 +1504,8 @@ if mode in ("ss2022", "both"):
     public_port = "${SS_PUBLIC_PORT}"
     method = "${SS_METHOD}"
     password = "${SS_PASSWORD}"
-    raw = f"{method}:{password}@{host}:{public_port}"
+    link_host = f"[{ss_host}]" if ":" in ss_host and not ss_host.startswith("[") else ss_host
+    raw = f"{method}:{password}@{link_host}:{public_port}"
     enc = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
     print()
     print("SS2022 landing")
@@ -1227,7 +1519,7 @@ if mode in ("ss2022", "both"):
     print(f"ss://{enc}#{quote(name + '-SS')}")
     print()
     print("ss_link_editable:")
-    print(f"ss://{method}:{quote(password, safe='')}@{host}:{public_port}#{quote(name + '-SS')}")
+    print(f"ss://{method}:{quote(password, safe='')}@{link_host}:{public_port}#{quote(name + '-SS')}")
     print()
     print("Paste ss_link into DMIT/HK:")
     print("  sb add-ss 'ss://...'")
@@ -1467,10 +1759,10 @@ install_home() {
   install_deps
   install_singbox
 
-  raw_home_name="$(ask "Home node name" "home")"
+  raw_home_name="$(ask "Landing node name" "landing")"
   HOME_NAME="$(safe_label "$raw_home_name")"
-  [ -n "$HOME_NAME" ] || HOME_NAME="home"
-  log "Home install mode:"
+  [ -n "$HOME_NAME" ] || HOME_NAME="landing"
+  log "Landing install mode:"
   log "1. SS2022 landing only"
   log "2. Reality direct only"
   log "3. SS2022 landing + Reality direct"
@@ -1483,16 +1775,27 @@ install_home() {
     *) die "Invalid home mode: $mode_choice" ;;
   esac
 
-  ACCESS_HOST="$(ask "Public IP/domain for exported links" "$(public_ip)")"
+  if ask_yes_no "Does this landing machine have usable IPv6? If yes, SS2022 links will use IPv6" "n"; then
+    HAS_IPV6="1"
+  else
+    HAS_IPV6="0"
+  fi
+  SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
+  validate_port "SSH port" "$SSH_PORT"
+
+  IPV4_HOST="$(public_ipv4)"
+  IPV6_HOST=""
+  [ "$HAS_IPV6" = "1" ] && IPV6_HOST="$(public_ipv6)"
+  ACCESS_HOST="$IPV4_HOST"
 
   if [ "$HOME_MODE" = "ss2022" ] || [ "$HOME_MODE" = "both" ]; then
-    SS_DEFAULT_PORT="443"
-    SS_PORT="$(ask "SS internal listen port" "$SS_DEFAULT_PORT")"
-    SS_PUBLIC_PORT="$(ask "SS public mapped port" "$SS_PORT")"
+    SS_PORT="8443"
+    SS_PUBLIC_PORT="8443"
     validate_port "SS internal listen port" "$SS_PORT"
     validate_port "SS public mapped port" "$SS_PUBLIC_PORT"
     SS_METHOD="${SS_METHOD:-2022-blake3-aes-256-gcm}"
     SS_PASSWORD="${SS_PASSWORD:-$(random_ss2022_password)}"
+    [ "$HAS_IPV6" = "1" ] && ACCESS_HOST="$IPV6_HOST"
   else
     SS_PORT=""
     SS_PUBLIC_PORT=""
@@ -1501,13 +1804,8 @@ install_home() {
   fi
 
   if [ "$HOME_MODE" = "reality" ] || [ "$HOME_MODE" = "both" ]; then
-    if [ "$HOME_MODE" = "both" ]; then
-      REALITY_DEFAULT_PORT="8443"
-    else
-      REALITY_DEFAULT_PORT="443"
-    fi
-    REALITY_PORT="$(ask "Reality internal listen port" "$REALITY_DEFAULT_PORT")"
-    REALITY_PUBLIC_PORT="$(ask "Reality public mapped port" "$REALITY_PORT")"
+    REALITY_PORT="443"
+    REALITY_PUBLIC_PORT="443"
     validate_port "Reality internal listen port" "$REALITY_PORT"
     validate_port "Reality public mapped port" "$REALITY_PUBLIC_PORT"
     REALITY_SNI="$(ask "Reality SNI" "${REALITY_SNI:-www.sony.jp}")"
@@ -1525,10 +1823,17 @@ install_home() {
   fi
 
   write_home_config
+  if [ "$HOME_MODE" = "both" ]; then
+    ACCESS_HOST="$IPV4_HOST"
+    SS_LINK_HOST="$([ "$HAS_IPV6" = "1" ] && printf '%s' "$IPV6_HOST" || printf '%s' "$IPV4_HOST")"
+  else
+    SS_LINK_HOST="$ACCESS_HOST"
+  fi
   cat > "$HOME_META_PATH" <<EOF
 HOME_NAME="${HOME_NAME}"
 HOME_MODE="${HOME_MODE}"
 ACCESS_HOST="${ACCESS_HOST}"
+SS_LINK_HOST="${SS_LINK_HOST:-$ACCESS_HOST}"
 SS_PORT="${SS_PORT}"
 SS_PUBLIC_PORT="${SS_PUBLIC_PORT}"
 SS_METHOD="${SS_METHOD}"
@@ -1545,6 +1850,12 @@ EOF
   check_config
   if [ "$OS_FAMILY" = "debian" ]; then
     write_systemd_service
+    case "$HOME_MODE" in
+      ss2022) ENABLE_REALITY="0"; ENABLE_SS="1" ;;
+      reality) ENABLE_REALITY="1"; ENABLE_SS="0" ;;
+      both) ENABLE_REALITY="1"; ENABLE_SS="1" ;;
+    esac
+    enable_entry_firewall
   else
     write_openrc_service
   fi
@@ -1591,16 +1902,15 @@ purge_all_current_install() {
 
 print_menu() {
   log ""
-  log "Smart sing-box simplified installer"
-  log "1. DMIT Debian entry"
-  log "2. HK Debian entry"
-  log "3. Home landing/direct"
-  log "4. Add ss:// to this entry"
-  log "5. Purge current install without backup"
-  log "6. Purge all, including nftables firewall"
-  log "7. Install stable network profile only"
-  log "8. Remove stable network profile only"
-  log "9. Show stable network profile status"
+  log "Smart sing-box installer"
+  log "1. Entry line machine"
+  log "2. Landing machine"
+  log "3. Add ss:// landing to this entry"
+  log "4. Purge current install without backup"
+  log "5. Purge all, including nftables firewall"
+  log "6. Install/switch network profile only"
+  log "7. Remove network profile only"
+  log "8. Show network profile status"
   log "0. Exit"
   log ""
 }
@@ -1612,19 +1922,28 @@ main() {
   print_menu > /dev/tty
   choice="$(ask "Choose" "")"
   case "$choice" in
-    1) install_entry dmit ;;
-    2) install_entry hk ;;
-    3) install_home ;;
-    4)
+    1)
+      log "Entry line type:"
+      log "1. DMIT"
+      log "2. Other region/provider"
+      entry_type="$(ask "Choose entry type" "1")"
+      case "$entry_type" in
+        1|dmit|DMIT) install_entry dmit ;;
+        2|other|Other) install_entry other ;;
+        *) die "Invalid entry type: $entry_type" ;;
+      esac
+      ;;
+    2) install_home ;;
+    3)
       [ -x /usr/local/bin/sb ] || die "sb manager not found. Install DMIT/HK entry first."
       link="$(ask "Paste ss:// link" "")"
       /usr/local/bin/sb add-ss "$link"
       ;;
-    5) purge_current_install ;;
-    6) purge_all_current_install ;;
-    7) install_stable_net_profile ;;
-    8) remove_stable_net_profile ;;
-    9) stable_net_status ;;
+    4) purge_current_install ;;
+    5) purge_all_current_install ;;
+    6) install_stable_net_profile ;;
+    7) remove_stable_net_profile ;;
+    8) stable_net_status ;;
     0) exit 0 ;;
     *) die "Invalid choice: $choice" ;;
   esac
