@@ -122,14 +122,6 @@ validate_port() {
   [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "$name must be between 1 and 65535."
 }
 
-public_ip() {
-  for u in https://api.ipify.org https://icanhazip.com https://ifconfig.me https://ipinfo.io/ip; do
-    ip="$(curl -fsSL --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
-    [ -n "$ip" ] && { printf '%s' "$ip"; return; }
-  done
-  printf 'YOUR_SERVER_IP'
-}
-
 public_ipv4() {
   for u in https://api.ipify.org https://ipv4.icanhazip.com https://ifconfig.me/ip; do
     ip="$(curl -4 -fsSL --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -144,6 +136,20 @@ public_ipv6() {
     [ -n "$ip" ] && { printf '%s' "$ip"; return; }
   done
   printf 'YOUR_SERVER_IPV6'
+}
+
+ensure_clean_install() {
+  if [ -e "$CONFIG_PATH" ] || [ -e "$SB_MANAGER" ]; then
+    die "Existing sing-box install detected. Use 'sb uninstall' first, or 'sb update' to update only the manager."
+  fi
+}
+
+detect_public_ipv6() {
+  DETECTED_IPV6="$(public_ipv6)"
+  case "$DETECTED_IPV6" in
+    ''|YOUR_SERVER_IPV6) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 reality_keypair() {
@@ -197,84 +203,8 @@ EOF
   rc-service sing-box restart
 }
 
-restart_singbox() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl restart sing-box
-  elif command -v rc-service >/dev/null 2>&1; then
-    rc-service sing-box restart
-  else
-    die "No supported service manager found."
-  fi
-}
-
 check_config() {
   sing-box check -c "$CONFIG_PATH"
-}
-
-backup_uninstall_archive() {
-  name="$1"
-  ts="$(date +%Y%m%d%H%M%S)"
-  archive="/root/singbox-${name}-uninstall-backup-${ts}.tar.gz"
-  tar -czf "$archive" \
-    "$CONFIG_DIR" \
-    "$INFO_ENTRY" \
-    "$INFO_HOME" \
-    "$SB_MANAGER" \
-    "$SB_BIN" \
-    "$SYSTEMD_SERVICE" \
-    "$OPENRC_SERVICE" \
-    "$NFT_CONF" \
-    "$TC_SERVICE" \
-    "$STABLE_SYSCTL_CONF" \
-    2>/dev/null || true
-  chmod 600 "$archive" 2>/dev/null || true
-  printf '%s' "$archive"
-}
-
-stop_and_remove_singbox_service() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl stop sing-box 2>/dev/null || true
-    systemctl disable sing-box 2>/dev/null || true
-    rm -f "$SYSTEMD_SERVICE"
-    systemctl daemon-reload 2>/dev/null || true
-  fi
-
-  if command -v rc-service >/dev/null 2>&1; then
-    rc-service sing-box stop 2>/dev/null || true
-    rc-update del sing-box default 2>/dev/null || true
-    rm -f "$OPENRC_SERVICE"
-  fi
-}
-
-remove_singbox_files() {
-  rm -rf "$CONFIG_DIR"
-  rm -f "$SB_MANAGER"
-  detected_singbox="$(command -v sing-box 2>/dev/null || true)"
-  [ -n "$detected_singbox" ] && rm -f "$detected_singbox"
-  rm -f "$SB_BIN"
-  rm -f "$INFO_ENTRY" "$INFO_HOME"
-}
-
-remove_stable_net_profile_quiet() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl disable --now tc-htb-fq.service 2>/dev/null || true
-  fi
-  rm -f "$TC_SERVICE"
-  rm -f "$STABLE_SYSCTL_CONF"
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl daemon-reload 2>/dev/null || true
-  fi
-  sysctl --system >/dev/null 2>&1 || true
-}
-
-remove_nftables_firewall() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl disable --now nftables 2>/dev/null || true
-  fi
-  if command -v nft >/dev/null 2>&1; then
-    nft flush ruleset 2>/dev/null || true
-  fi
-  rm -f "$NFT_CONF"
 }
 
 default_netdev() {
@@ -292,14 +222,16 @@ install_stable_net_profile() {
     log "2. dmit-safe         800mbit HTB + conservative TCP output limit"
     log "3. dmit-balanced     900mbit HTB + larger TCP output/buffer, recommended for DMIT"
     log "4. dmit-performance  1000mbit HTB + larger TCP output/buffer"
-    log "5. custom            custom HTB rate + larger TCP output/buffer"
-    profile="$(ask "Choose profile" "dmit-balanced")"
+    log "5. dmit-ultra        1200mbit HTB + larger TCP output/buffer"
+    log "6. custom            custom HTB rate + larger TCP output/buffer"
+    profile="$(ask "Choose profile" "dmit-performance")"
     case "$profile" in
       1) profile="basic" ;;
       2) profile="dmit-safe" ;;
       3) profile="dmit-balanced" ;;
       4) profile="dmit-performance" ;;
-      5) profile="custom" ;;
+      5) profile="dmit-ultra" ;;
+      6) profile="custom" ;;
     esac
   fi
 
@@ -324,6 +256,12 @@ install_stable_net_profile() {
     dmit-performance|performance)
       profile="dmit-performance"
       rate="1000mbit"
+      limit="1048576"
+      buffer32="1"
+      ;;
+    dmit-ultra|ultra)
+      profile="dmit-ultra"
+      rate="1200mbit"
       limit="1048576"
       buffer32="1"
       ;;
@@ -455,9 +393,9 @@ enable_entry_firewall() {
     log "WARNING: firewall will allow SSH TCP ${SSH_PORT}, enabled Reality TCP 443, and enabled SS2022 ports only."
     log "Current SSH server port looks like: ${current_ssh_port:-unknown}."
     log "Please move SSH to TCP ${SSH_PORT} before enabling this firewall."
-    printf "Type ENTRYFW to continue anyway: " > /dev/tty
+    printf "Type OK to continue anyway: " > /dev/tty
     read -r confirm < /dev/tty
-    [ "$confirm" = "ENTRYFW" ] || die "Cancelled firewall setup."
+    [ "$confirm" = "OK" ] || die "Cancelled firewall setup."
   elif [ "${FORCE_ENTRY_FIREWALL:-0}" != "1" ]; then
     log ""
     log "WARNING: This will enable the entry firewall."
@@ -465,9 +403,9 @@ enable_entry_firewall() {
     [ "${ENABLE_SS:-0}" = "1" ] && log "Inbound TCP/UDP 8443 is for SS2022."
     log "Inbound TCP ${SSH_PORT} is for SSH."
     log "Make sure you have provider console/rescue access before continuing."
-    printf "Type ENTRYFW to continue: " > /dev/tty
+    printf "Type OK to continue: " > /dev/tty
     read -r confirm < /dev/tty
-    [ "$confirm" = "ENTRYFW" ] || die "Cancelled firewall setup."
+    [ "$confirm" = "OK" ] || die "Cancelled firewall setup."
   fi
 
   cat > /etc/nftables.conf <<EOF
@@ -509,8 +447,9 @@ EOF
   }
 }
 EOF
-  systemctl enable --now nftables
+  nft -c -f /etc/nftables.conf
   nft -f /etc/nftables.conf
+  systemctl enable nftables
 }
 
 entry_config() {
@@ -607,7 +546,7 @@ EOF
 write_entry_manager() {
   cat > /usr/local/bin/sb <<'PYEOF'
 #!/usr/bin/env python3
-import base64, json, os, re, shutil, subprocess, sys, time, uuid
+import base64, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
@@ -915,9 +854,19 @@ def status_test():
         subprocess.call(["rc-service", "sing-box", "status"])
     print("\n== listen ports ==")
     if shutil.which("ss"):
-        subprocess.call(["ss", "-lntp"])
+        subprocess.call(["ss", "-lntup"])
     elif shutil.which("netstat"):
-        subprocess.call(["netstat", "-lntp"])
+        subprocess.call(["netstat", "-lntup"])
+
+def update_manager():
+    url = "https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh"
+    with tempfile.NamedTemporaryFile(prefix="smart-singbox-", suffix=".sh", delete=False) as f:
+        script = f.name
+    try:
+        subprocess.check_call(["curl", "-fsSL", url, "-o", script])
+        subprocess.check_call(["bash", script, "update-manager"])
+    finally:
+        Path(script).unlink(missing_ok=True)
 
 def default_netdev():
     try:
@@ -941,6 +890,8 @@ def install_stable_net_profile(profile=None, rate=None, dev=None):
         "balanced": ("900mbit", "1048576", True),
         "dmit-performance": ("1000mbit", "1048576", True),
         "performance": ("1000mbit", "1048576", True),
+        "dmit-ultra": ("1200mbit", "1048576", True),
+        "ultra": ("1200mbit", "1048576", True),
     }
     if profile and profile not in valid_profiles and profile != "custom" and dev is None:
         dev = profile
@@ -951,14 +902,16 @@ def install_stable_net_profile(profile=None, rate=None, dev=None):
         print("2. dmit-safe         800mbit HTB + conservative TCP output limit")
         print("3. dmit-balanced     900mbit HTB + larger TCP output/buffer, recommended for DMIT")
         print("4. dmit-performance  1000mbit HTB + larger TCP output/buffer")
-        print("5. custom            custom HTB rate + larger TCP output/buffer")
-        profile = input("Choose profile [dmit-balanced]: ").strip() or "dmit-balanced"
+        print("5. dmit-ultra        1200mbit HTB + larger TCP output/buffer")
+        print("6. custom            custom HTB rate + larger TCP output/buffer")
+        profile = input("Choose profile [dmit-performance]: ").strip() or "dmit-performance"
         profile = {
             "1": "basic",
             "2": "dmit-safe",
             "3": "dmit-balanced",
             "4": "dmit-performance",
-            "5": "custom",
+            "5": "dmit-ultra",
+            "6": "custom",
         }.get(profile, profile)
 
     if profile == "custom":
@@ -1188,6 +1141,7 @@ def menu():
         print("14. Install stable network profile")
         print("15. Remove stable network profile")
         print("16. Show stable network profile status")
+        print("17. Update sb manager")
         print("0. Exit")
         choice = input("Choose: ").strip()
         if choice == "1":
@@ -1225,6 +1179,8 @@ def menu():
             remove_stable_net_profile()
         elif choice == "16":
             stable_net_status()
+        elif choice == "17":
+            update_manager()
         elif choice == "0":
             return
 
@@ -1236,15 +1192,15 @@ def main():
     if cmd == "add-ss":
         add_ss(" ".join(args[1:]) if len(args) > 1 else input("Paste ss:// link: ").strip())
     elif cmd == "del-relay":
-        del_user(args[1], relay_only=True)
+        del_user(args[1] if len(args) > 1 else input("Relay name: ").strip(), relay_only=True)
     elif cmd == "list-relays":
         list_relays()
     elif cmd == "links":
         list_links()
     elif cmd == "add-friend":
-        add_friend(args[1])
+        add_friend(args[1] if len(args) > 1 else input("Friend name: ").strip())
     elif cmd == "del-user":
-        del_user(args[1], relay_only=False)
+        del_user(args[1] if len(args) > 1 else input("User name: ").strip(), relay_only=False)
     elif cmd == "restart":
         restart()
     elif cmd == "test":
@@ -1269,8 +1225,10 @@ def main():
         remove_stable_net_profile()
     elif cmd == "stable-status":
         stable_net_status(args[1] if len(args) > 1 else None)
+    elif cmd == "update":
+        update_manager()
     else:
-        print("Usage: sb [add-ss|del-relay|list-relays|links|add-friend|del-user|restart|test|backup|restore-latest|uninstall|purge|purge-all|stable-install|stable-remove|stable-status]")
+        print("Usage: sb [add-ss|del-relay|list-relays|links|add-friend|del-user|restart|test|backup|restore-latest|uninstall|purge|purge-all|stable-install|stable-remove|stable-status|update]")
         raise SystemExit(1)
 
 if __name__ == "__main__":
@@ -1282,6 +1240,7 @@ PYEOF
 install_entry() {
   role="$1"
   [ "$OS_FAMILY" = "debian" ] || die "Entry requires Debian/Ubuntu."
+  ensure_clean_install
   install_deps
   install_singbox
 
@@ -1300,22 +1259,25 @@ install_entry() {
 
   NODE_PREFIX="$(safe_label "$(ask "Node name shown in links" "$NODE_PREFIX")")"
   [ -n "$NODE_PREFIX" ] || NODE_PREFIX="ENTRY"
-  if ask_yes_no "Does this entry machine have usable IPv6? If yes, SS2022 will be installed on 8443" "n"; then
-    ENABLE_SS="1"
+  if detect_public_ipv6; then
+    log "Detected usable IPv6: $DETECTED_IPV6"
+    if ask_yes_no "Enable SS2022 on 8443 with this IPv6" "y"; then
+      ENABLE_SS="1"
+      SS_ACCESS_HOST="$DETECTED_IPV6"
+    else
+      ENABLE_SS="0"
+      SS_ACCESS_HOST=""
+    fi
   else
+    log "No usable IPv6 detected. This entry will install Reality only."
     ENABLE_SS="0"
+    SS_ACCESS_HOST=""
   fi
   REALITY_SNI="$(ask "Reality SNI / camouflage site" "$REALITY_SNI")"
   SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
   validate_port "SSH port" "$SSH_PORT"
 
   ACCESS_HOST="$(public_ipv4)"
-  if [ "$ENABLE_SS" = "1" ]; then
-    SS_ACCESS_HOST="$(public_ipv6)"
-  else
-    SS_ACCESS_HOST=""
-  fi
-
   ENTRY_USERS="CAO,WEI,TAO,XU"
   ENTRY_UUIDS="$(random_uuid),$(random_uuid),$(random_uuid),$(random_uuid)"
   ENTRY_SIDS="$(random_hex8),$(random_hex8),$(random_hex8),$(random_hex8)"
@@ -1349,54 +1311,18 @@ install_entry() {
   else
     log "Firewall: inbound TCP ${SSH_PORT} and TCP 443."
   fi
-  if [ "$NODE_ROLE" = "dmit" ] && ask_yes_no "Install a DMIT network optimization profile now?" "y"; then
-    install_stable_net_profile
+  if [ "$NODE_ROLE" = "dmit" ]; then
+    dmit_profile="$(ask "DMIT profile: skip/safe/balanced/performance/ultra/custom" "performance")"
+    case "$dmit_profile" in
+      skip|0|n|N) log "DMIT network profile skipped." ;;
+      safe|1) install_stable_net_profile dmit-safe ;;
+      balanced|2) install_stable_net_profile dmit-balanced ;;
+      performance|3) install_stable_net_profile dmit-performance ;;
+      ultra|4) install_stable_net_profile dmit-ultra ;;
+      custom|5) install_stable_net_profile custom ;;
+      *) die "Invalid DMIT profile: $dmit_profile" ;;
+    esac
   fi
-}
-
-ss_uri() {
-  python3 - <<PY
-import base64
-from urllib.parse import quote
-method = "${SS_METHOD}"
-password = "${SS_PASSWORD}"
-host = "${ACCESS_HOST}"
-ss_host = "${SS_LINK_HOST:-$ACCESS_HOST}"
-port = "${SS_PUBLIC_PORT}"
-name = "${HOME_NAME}-SS"
-link_host = f"[{ss_host}]" if ":" in ss_host and not ss_host.startswith("[") else ss_host
-raw = f"{method}:{password}@{link_host}:{port}"
-enc = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
-print(f"ss://{enc}#{quote(name)}")
-PY
-}
-
-ss_uri_editable() {
-  python3 - <<PY
-from urllib.parse import quote
-method = "${SS_METHOD}"
-password = "${SS_PASSWORD}"
-host = "${ACCESS_HOST}"
-ss_host = "${SS_LINK_HOST:-$ACCESS_HOST}"
-port = "${SS_PUBLIC_PORT}"
-name = "${HOME_NAME}-SS"
-link_host = f"[{ss_host}]" if ":" in ss_host and not ss_host.startswith("[") else ss_host
-print(f"ss://{method}:{quote(password, safe='')}@{link_host}:{port}#{quote(name)}")
-PY
-}
-
-reality_uri() {
-  python3 - <<PY
-from urllib.parse import quote
-host = "${ACCESS_HOST}"
-port = "${REALITY_PUBLIC_PORT}"
-name = "${HOME_NAME}-Reality"
-uuid = "${REALITY_UUID}"
-sni = "${REALITY_SNI}"
-pbk = "${REALITY_PUBLIC_KEY}"
-sid = "${REALITY_SID}"
-print(f"vless://{uuid}@{host}:{port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni={sni}&fp=chrome&pbk={pbk}&sid={sid}&type=tcp&headerType=none#{quote(name)}")
-PY
 }
 
 write_home_config() {
@@ -1629,10 +1555,19 @@ test_status() {
   echo
   echo "== listen ports =="
   if command -v ss >/dev/null 2>&1; then
-    ss -lntp || true
+    ss -lntup || true
   elif command -v netstat >/dev/null 2>&1; then
-    netstat -lntp || true
+    netstat -lntup || true
   fi
+}
+
+update_manager() {
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' EXIT INT TERM
+  curl -fsSL https://raw.githubusercontent.com/xijicao/smart-singbox-installer/main/install.sh -o "$tmp"
+  bash "$tmp" update-manager
+  rm -f "$tmp"
+  trap - EXIT INT TERM
 }
 
 uninstall_home() {
@@ -1736,6 +1671,9 @@ case "${1:-menu}" in
   reset-ss)
     reset_ss
     ;;
+  update)
+    update_manager
+    ;;
   uninstall)
     uninstall_home
     ;;
@@ -1755,6 +1693,7 @@ case "${1:-menu}" in
     echo "6. Uninstall home install"
     echo "7. Purge home install without backup"
     echo "8. Purge all, including nftables firewall"
+    echo "9. Update sb manager"
     echo "0. Exit"
     printf "Choose: "
     read -r c
@@ -1767,6 +1706,7 @@ case "${1:-menu}" in
       6) "$0" uninstall ;;
       7) "$0" purge ;;
       8) "$0" purge-all ;;
+      9) "$0" update ;;
       0) exit 0 ;;
     esac
     ;;
@@ -1776,6 +1716,7 @@ EOF
 }
 
 install_home() {
+  ensure_clean_install
   install_deps
   install_singbox
 
@@ -1795,24 +1736,28 @@ install_home() {
     *) die "Invalid home mode: $mode_choice" ;;
   esac
 
-  if ask_yes_no "Does this landing machine have usable IPv6? If yes, SS2022 links will use IPv6" "n"; then
-    HAS_IPV6="1"
-  else
-    HAS_IPV6="0"
+  HAS_IPV6="0"
+  IPV6_HOST=""
+  if [ "$HOME_MODE" = "ss2022" ] || [ "$HOME_MODE" = "both" ]; then
+    if detect_public_ipv6; then
+      log "Detected usable IPv6: $DETECTED_IPV6"
+      if ask_yes_no "Use this IPv6 in SS2022 links" "y"; then
+        HAS_IPV6="1"
+        IPV6_HOST="$DETECTED_IPV6"
+      fi
+    else
+      log "No usable IPv6 detected. SS2022 links will use IPv4."
+    fi
   fi
   SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
   validate_port "SSH port" "$SSH_PORT"
 
   IPV4_HOST="$(public_ipv4)"
-  IPV6_HOST=""
-  [ "$HAS_IPV6" = "1" ] && IPV6_HOST="$(public_ipv6)"
   ACCESS_HOST="$IPV4_HOST"
 
   if [ "$HOME_MODE" = "ss2022" ] || [ "$HOME_MODE" = "both" ]; then
     SS_PORT="8443"
     SS_PUBLIC_PORT="8443"
-    validate_port "SS internal listen port" "$SS_PORT"
-    validate_port "SS public mapped port" "$SS_PUBLIC_PORT"
     SS_METHOD="${SS_METHOD:-2022-blake3-aes-256-gcm}"
     SS_PASSWORD="${SS_PASSWORD:-$(random_ss2022_password)}"
     [ "$HAS_IPV6" = "1" ] && ACCESS_HOST="$IPV6_HOST"
@@ -1826,8 +1771,6 @@ install_home() {
   if [ "$HOME_MODE" = "reality" ] || [ "$HOME_MODE" = "both" ]; then
     REALITY_PORT="443"
     REALITY_PUBLIC_PORT="443"
-    validate_port "Reality internal listen port" "$REALITY_PORT"
-    validate_port "Reality public mapped port" "$REALITY_PUBLIC_PORT"
     REALITY_SNI="$(ask "Reality SNI / camouflage site" "${REALITY_SNI:-www.sony.jp}")"
     REALITY_UUID="$(random_uuid)"
     REALITY_SID="$(random_hex8)"
@@ -1889,35 +1832,33 @@ EOF
   log "Manager: sb"
 }
 
-purge_current_install() {
-  log ""
-  log "This will remove current sing-box install WITHOUT backup."
-  log "It removes service files, sing-box binary, /etc/sing-box, /usr/local/bin/sb, info files and stable network profile."
-  log "nftables is NOT disabled automatically to avoid changing SSH exposure unexpectedly."
-  printf "Type PURGE to continue: " > /dev/tty
-  read -r confirm < /dev/tty
-  [ "$confirm" = "PURGE" ] || die "Cancelled."
+update_manager_only() {
+  [ -x "$SB_MANAGER" ] || die "No sb manager found. Install a node first."
+  ts="$(date +%Y%m%d%H%M%S)"
+  backup="${SB_MANAGER}.bak.${ts}"
+  cp -a "$SB_MANAGER" "$backup"
 
-  stop_and_remove_singbox_service
-  remove_stable_net_profile_quiet
-  remove_singbox_files
-  log "Purged current sing-box install without backup."
-  log "nftables was kept enabled. Choose purge-all if you also want to remove firewall rules."
-}
-
-purge_all_current_install() {
-  log ""
-  log "This will remove sing-box and nftables firewall rules WITHOUT backup."
-  log "Only use this when you have another firewall plan or console access."
-  printf "Type PURGE_ALL to continue: " > /dev/tty
-  read -r confirm < /dev/tty
-  [ "$confirm" = "PURGE_ALL" ] || die "Cancelled."
-
-  stop_and_remove_singbox_service
-  remove_stable_net_profile_quiet
-  remove_nftables_firewall
-  remove_singbox_files
-  log "Purged sing-box, stable network profile and nftables firewall without backup."
+  if [ -r "$META_PATH" ] && [ ! -r "$HOME_META_PATH" ]; then
+    write_entry_manager
+    if ! python3 - "$SB_MANAGER" <<'PY'
+from pathlib import Path
+import sys
+compile(Path(sys.argv[1]).read_text(encoding="utf-8"), sys.argv[1], "exec")
+PY
+    then
+      cp -a "$backup" "$SB_MANAGER"
+      die "Updated entry manager failed validation; restored $backup"
+    fi
+  elif [ -r "$HOME_META_PATH" ] && [ ! -r "$META_PATH" ]; then
+    write_home_manager
+    if ! sh -n "$SB_MANAGER"; then
+      cp -a "$backup" "$SB_MANAGER"
+      die "Updated home manager failed validation; restored $backup"
+    fi
+  else
+    die "Cannot identify a single entry or landing installation."
+  fi
+  log "sb manager updated. Backup: $backup"
 }
 
 print_menu() {
@@ -1925,12 +1866,7 @@ print_menu() {
   log "Smart sing-box installer"
   log "1. Entry line machine"
   log "2. Landing machine"
-  log "3. Add ss:// landing to this entry"
-  log "4. Purge current install without backup"
-  log "5. Purge all, including nftables firewall"
-  log "6. Install/switch network profile only"
-  log "7. Remove network profile only"
-  log "8. Show network profile status"
+  log "3. Update existing sb manager"
   log "0. Exit"
   log ""
 }
@@ -1938,6 +1874,10 @@ print_menu() {
 main() {
   need_root
   need_tty
+  if [ "${1:-}" = "update-manager" ] || [ "${1:-}" = "--update-manager" ]; then
+    update_manager_only
+    exit 0
+  fi
   detect_os
   print_menu > /dev/tty
   choice="$(ask "Choose" "")"
@@ -1954,16 +1894,7 @@ main() {
       esac
       ;;
     2) install_home ;;
-    3)
-      [ -x /usr/local/bin/sb ] || die "sb manager not found. Install DMIT/HK entry first."
-      link="$(ask "Paste ss:// link" "")"
-      /usr/local/bin/sb add-ss "$link"
-      ;;
-    4) purge_current_install ;;
-    5) purge_all_current_install ;;
-    6) install_stable_net_profile ;;
-    7) remove_stable_net_profile ;;
-    8) stable_net_status ;;
+    3) update_manager_only ;;
     0) exit 0 ;;
     *) die "Invalid choice: $choice" ;;
   esac

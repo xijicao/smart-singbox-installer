@@ -10,7 +10,7 @@ SS2022: 8443
 SSH: 你自己提前改好的高位端口
 ```
 
-线路机默认生成三个用户：
+线路机默认生成四个用户：
 
 ```text
 CAO
@@ -87,12 +87,7 @@ sh install.sh
 ```text
 1. Entry line machine
 2. Landing machine
-3. Add ss:// landing to this entry
-4. Purge current install without backup
-5. Purge all, including nftables firewall
-6. Install/switch network profile only
-7. Remove network profile only
-8. Show network profile status
+3. Update existing sb manager
 0. Exit
 ```
 
@@ -111,14 +106,14 @@ sh install.sh
 
 ```text
 自动获取公网 IPv4，Reality 链接使用这个 IPv4
-问你有没有 IPv6，完全按你的回答决定是否安装 SS2022
+自动检测可用 IPv6；检测到后只确认一次是否安装 SS2022
 手动输入 Reality SNI / 伪装站点
 有 IPv6：安装 Reality + SS2022
 没 IPv6：只安装 Reality
 固定生成 CAO / WEI / TAO / XU 四个用户
 Reality 固定监听 443
 SS2022 固定监听 8443
-DMIT 才询问是否安装网络优化档位
+DMIT 安装时选择 skip / safe / balanced / performance / ultra / custom 网络优化档位，默认 performance
 ```
 
 线路机防火墙：
@@ -144,7 +139,7 @@ TCP 443
 ```text
 只生成一个用户
 协议由你选择，和有没有 IPv6 不绑定
-问你有没有 IPv6，只影响 SS2022 链接使用 IPv6 还是 IPv4
+若选择 SS2022，自动检测可用 IPv6；检测到后只确认一次是否用于 SS2022 链接
 启用 Reality 时，手动输入 Reality SNI / 伪装站点
 Reality 固定 443
 SS2022 固定 8443
@@ -158,7 +153,7 @@ TCP SSH高位端口
 启用 SS2022 时放行 TCP 8443 和 UDP 8443
 ```
 
-`3. Add ss:// landing to this entry`
+链式代理：`sb add-ss 'ss://...'`
 
 在线路机上导入落地机的 `ss://` 链接。名称从 `ss://` 的备注里取。
 
@@ -176,37 +171,6 @@ TCP SSH高位端口
 ```text
 客户端 -> 线路机 Reality -> 落地机 SS2022 -> 目标网站
 ```
-
-`4. Purge current install without backup`
-
-无备份清理 sing-box，但保留 nftables 防火墙。适合安装失败后重新安装，同时不突然改变 SSH 暴露状态。
-
-`5. Purge all, including nftables firewall`
-
-完全清理，包括：
-
-```text
-sing-box 服务
-/etc/sing-box
-/usr/local/bin/sb
-sing-box 二进制
-nftables 规则和 /etc/nftables.conf
-DMIT 网络优化服务和 sysctl 文件
-```
-
-注意：这个会执行 `nft flush ruleset`，只在你确认不会断开 SSH 或暴露机器时使用。
-
-`6. Install/switch network profile only`
-
-只安装或切换网络优化档位，不改 sing-box 配置。
-
-`7. Remove network profile only`
-
-只移除网络优化档位，不动 sing-box。
-
-`8. Show network profile status`
-
-查看当前 sysctl、tc 队列、tc 限速服务状态。
 
 ## 安装后检查
 
@@ -269,6 +233,12 @@ sb links
 ```
 
 显示所有 Reality 链接；如果安装了 SS2022，也显示 CAO / WEI / TAO / XU 四个 SS2022 链接。
+
+```sh
+sb update
+```
+
+只更新 `sb` 管理器并自动备份旧版；不改 sing-box 配置、节点、端口、防火墙或 DMIT 调优。
 
 ```sh
 sb add-friend NAME
@@ -411,6 +381,7 @@ sb stable-install basic
 sb stable-install dmit-safe
 sb stable-install dmit-balanced
 sb stable-install dmit-performance
+sb stable-install dmit-ultra
 sb stable-install custom 750mbit
 ```
 
@@ -446,6 +417,15 @@ HTB 1000mbit + fq
 tcp_limit_output_bytes=1048576
 启用 32MB TCP buffer 上限
 追求峰值，线路不稳时可能重传升高
+```
+
+`dmit-ultra`：
+
+```text
+HTB 1200mbit + fq
+tcp_limit_output_bytes=1048576
+启用 32MB TCP buffer 上限
+适合确认 VPS 端口至少为 1.2Gbps 的机器
 ```
 
 查看是否生效：
