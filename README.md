@@ -99,7 +99,9 @@ sh install.sh
 
 ```text
 1. DMIT
-2. Other region/provider
+2. DE（默认 SNI：www.th-nuernberg.de）
+3. HK（默认 SNI：www.hkex.com.hk）
+4. Other region/provider（SNI 手动填写）
 ```
 
 线路机行为：

@@ -1250,10 +1250,20 @@ install_entry() {
       NODE_PREFIX="${NODE_PREFIX:-DMIT}"
       REALITY_SNI="${REALITY_SNI:-reed.edu}"
       ;;
+    de)
+      NODE_ROLE="other"
+      NODE_PREFIX="${NODE_PREFIX:-DE}"
+      REALITY_SNI="${REALITY_SNI:-www.th-nuernberg.de}"
+      ;;
+    hk)
+      NODE_ROLE="other"
+      NODE_PREFIX="${NODE_PREFIX:-HK}"
+      REALITY_SNI="${REALITY_SNI:-www.hkex.com.hk}"
+      ;;
     other|*)
       NODE_ROLE="other"
       NODE_PREFIX="${NODE_PREFIX:-ENTRY}"
-      REALITY_SNI="${REALITY_SNI:-www.microsoft.com}"
+      REALITY_SNI="${REALITY_SNI:-}"
       ;;
   esac
 
@@ -1274,6 +1284,7 @@ install_entry() {
     SS_ACCESS_HOST=""
   fi
   REALITY_SNI="$(ask "Reality SNI / camouflage site" "$REALITY_SNI")"
+  [ -n "$REALITY_SNI" ] || die "Reality SNI is required."
   SSH_PORT="$(ask "SSH port to allow in firewall" "${SSH_PORT:-51398}")"
   validate_port "SSH port" "$SSH_PORT"
 
@@ -1885,11 +1896,15 @@ main() {
     1)
       log "Entry line type:"
       log "1. DMIT"
-      log "2. Other region/provider"
+      log "2. DE (default SNI: www.th-nuernberg.de)"
+      log "3. HK (default SNI: www.hkex.com.hk)"
+      log "4. Other region/provider (manual SNI)"
       entry_type="$(ask "Choose entry type" "1")"
       case "$entry_type" in
         1|dmit|DMIT) install_entry dmit ;;
-        2|other|Other) install_entry other ;;
+        2|de|DE) install_entry de ;;
+        3|hk|HK) install_entry hk ;;
+        4|other|Other) install_entry other ;;
         *) die "Invalid entry type: $entry_type" ;;
       esac
       ;;
