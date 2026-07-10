@@ -798,8 +798,23 @@ def add_friend(name):
     sid = os.urandom(4).hex()
     ib.setdefault("users", []).append(user)
     ib["tls"]["reality"].setdefault("short_id", []).append(sid)
+
+    ss_user = None
+    for item in cfg.get("inbounds", []):
+        if item.get("type") == "shadowsocks" and item.get("tag") == "ss-in":
+            ss_user = {
+                "name": name,
+                "password": base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("="),
+            }
+            item.setdefault("users", []).append(ss_user)
+            break
+
     save_cfg(cfg, "add-friend")
+    print("Reality:")
     print(link_for_user(name, user, sid))
+    if ss_user:
+        print("\nSS2022:")
+        print(ss_link_for_user(name, ss_user))
 
 def del_user(name, relay_only=False):
     cfg = load_cfg()
@@ -811,6 +826,10 @@ def del_user(name, relay_only=False):
     if relay_only and not name.startswith("relay-"):
         raise SystemExit("This command only deletes relay-* users.")
     users.pop(idx)
+    for item in cfg.get("inbounds", []):
+        if item.get("type") == "shadowsocks" and item.get("tag") == "ss-in":
+            item["users"] = [u for u in item.get("users", []) if u.get("name") != name]
+            break
     sids = ib["tls"]["reality"].setdefault("short_id", [])
     if idx < len(sids):
         sids.pop(idx)
@@ -1297,14 +1316,14 @@ install_entry() {
     SS_ACCESS_HOST=""
   fi
 
-  ENTRY_USERS="CAO,WEI,TAO"
-  ENTRY_UUIDS="$(random_uuid),$(random_uuid),$(random_uuid)"
-  ENTRY_SIDS="$(random_hex8),$(random_hex8),$(random_hex8)"
+  ENTRY_USERS="CAO,WEI,TAO,XU"
+  ENTRY_UUIDS="$(random_uuid),$(random_uuid),$(random_uuid),$(random_uuid)"
+  ENTRY_SIDS="$(random_hex8),$(random_hex8),$(random_hex8),$(random_hex8)"
   reality_keypair
   SS_METHOD="2022-blake3-aes-128-gcm"
   if [ "$ENABLE_SS" = "1" ]; then
     SS_SERVER_PASSWORD="$(openssl rand -base64 16 | tr -d '\n\r')"
-    SS_USER_PASSWORDS="$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r')"
+    SS_USER_PASSWORDS="$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r'),$(openssl rand -base64 16 | tr -d '\n\r')"
   else
     SS_SERVER_PASSWORD=""
     SS_USER_PASSWORDS=""

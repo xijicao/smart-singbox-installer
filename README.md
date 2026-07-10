@@ -16,6 +16,7 @@ SSH: 你自己提前改好的高位端口
 CAO
 WEI
 TAO
+XU
 ```
 
 落地机默认只生成一个用户：
@@ -114,7 +115,7 @@ sh install.sh
 手动输入 Reality SNI / 伪装站点
 有 IPv6：安装 Reality + SS2022
 没 IPv6：只安装 Reality
-固定生成 CAO / WEI / TAO 三个用户
+固定生成 CAO / WEI / TAO / XU 四个用户
 Reality 固定监听 443
 SS2022 固定监听 8443
 DMIT 才询问是否安装网络优化档位
@@ -267,7 +268,13 @@ sb
 sb links
 ```
 
-显示所有 Reality 链接；如果安装了 SS2022，也显示 CAO / WEI / TAO 三个 SS2022 链接。
+显示所有 Reality 链接；如果安装了 SS2022，也显示 CAO / WEI / TAO / XU 四个 SS2022 链接。
+
+```sh
+sb add-friend NAME
+```
+
+新增一个 Reality 用户；如果该线路机已启用 SS2022（通常是安装时确认具备可用 IPv6），会同时新增同名 SS2022 用户并输出两条链接。未启用 SS2022 的线路机只新增 Reality 用户。
 
 ```sh
 sb add-ss 'ss://...'
