@@ -116,6 +116,13 @@ SS2022 固定监听 8443
 DMIT 安装时选择 skip / safe / balanced / performance / ultra / custom 网络优化档位，默认 performance
 ```
 
+备用线路机网络策略：
+
+```text
+DE：实测 BBR + fq 更好。安装后手动执行 sb stable-install basic；该档位不启用 HTB 限速。
+HK：保留 cubic + fq_codel，不执行 stable-install 调优；HK 只有 10 Mbps 上下行，优先保持队列稳定。
+```
+
 线路机防火墙：
 
 ```text
@@ -292,6 +299,7 @@ sb restore-latest
 sb stable-install dmit-safe
 sb stable-install dmit-balanced
 sb stable-install dmit-performance
+sb stable-install dmit-ultra
 ```
 
 切换 DMIT 网络优化档位。
