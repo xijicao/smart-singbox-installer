@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -eu
+{ printf '%s\n' 'set -eu'; tail -n +3 "$0"; } | tr -d '\r' | sh -s -- "$@"; exit $? # normalize CRLF
 
 CONFIG_DIR="/etc/sing-box"
 CONFIG_PATH="${CONFIG_DIR}/config.json"
@@ -1416,7 +1416,7 @@ EOF
 write_home_manager() {
   cat > /usr/local/bin/sb <<'EOF'
 #!/usr/bin/env sh
-set -eu
+{ printf '%s\n' 'set -eu'; tail -n +3 "$0"; } | tr -d '\r' | sh -s -- "$@"; exit $? # normalize CRLF
 CONFIG_PATH="/etc/sing-box/config.json"
 HOME_META_PATH="/etc/sing-box/home.env"
 INFO_HOME="/root/singbox-home-info.txt"
